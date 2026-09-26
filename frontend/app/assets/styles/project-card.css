@@ -1,0 +1,187 @@
+/*
+ * project-card.css — ProjectCard.vue 卡片内部样式（scoped 挂在组件自身）。
+ * 组件拆分后父页（index.vue）的 scoped 样式无法穿透子组件内部元素，卡片内部样式必须随组件走；
+ * .project-card 根元素的基础/悬停规则仍留在 launcher.css（根元素同时携带父作用域属性）。
+ */
+.project-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 海报底：顶部微亮渐变 + 极淡点阵纹理 + 底部蓝晕托住图标 */
+  background:
+    radial-gradient(90% 72% at 50% 116%, rgba(0, 113, 227, 0.15), transparent 62%),
+    radial-gradient(rgba(74, 111, 181, 0.13) 1px, transparent 1.4px),
+    linear-gradient(162deg, #f1f7ff 0%, #e3edff 58%, #d9e7ff 100%);
+  background-size: auto, 18px 18px, auto;
+  color: #4a6fb5;
+}
+.project-thumb > svg {
+  transition: transform 0.45s var(--ease-out), filter 0.45s var(--ease-out);
+}
+.project-card:hover .project-thumb > svg {
+  transform: scale(1.12) rotate(-4deg);
+  filter: drop-shadow(0 8px 16px rgba(58, 92, 156, 0.26));
+}
+/* hover 光泽扫过：一条白色高光从左至右掠过封面 */
+.project-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.55) 50%, transparent 58%);
+  transform: translateX(-105%);
+  transition: transform 0.75s var(--ease-out);
+  pointer-events: none;
+}
+.project-card:hover .project-thumb::after { transform: translateX(105%); }
+
+.cover-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  color: var(--text-1);
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.status-dot.on { background: var(--success); }
+.status-dot.done { background: var(--accent); }
+.status-dot.err { background: var(--error); }
+.status-wrap { position: absolute; top: 10px; left: 10px; }
+.status-wrap .cover-badge { position: static; }
+.status-badge { cursor: pointer; border: none; font: inherit; }
+.status-menu {
+  top: calc(100% + 6px);
+  left: 0;
+  right: auto;
+  width: 108px;
+}
+.status-menu .menu-item.on { color: var(--accent); background: var(--accent-bg); }
+.more-wrap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.cover-more {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out), background 0.15s var(--ease-out);
+}
+.cover-more:hover { background: #fff; }
+.project-card:hover .cover-more,
+.more-wrap:focus-within .cover-more { opacity: 1; }
+.more-menu {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  width: 138px;
+  display: grid;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-lg);
+  z-index: 5;
+}
+.menu-item {
+  min-height: var(--button-height-sm);
+  display: flex;
+  align-items: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  padding: 0 9px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.14s var(--ease-out);
+}
+.menu-item:hover { background: var(--bg-hover); color: var(--text-0); }
+.menu-item:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+  box-shadow: 0 0 0 2px var(--button-focus);
+}
+.menu-item.is-danger { color: var(--action-danger); }
+.menu-item.is-danger:hover { background: var(--action-danger-bg); color: var(--action-danger); }
+
+.project-body { padding: var(--sp-4); }
+.project-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-0);
+  transition: color 0.18s var(--ease-out);
+}
+.project-card:hover .project-name { color: var(--accent-text); }
+.project-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+.project-foot {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.project-foot .updated {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+/* 画幅芯片：等宽字小标签，呼应创建时固定的画幅比例 */
+.ratio-chip {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-0);
+  font: 600 10px/1.4 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+/* hover 时浮现的“打开”引导，让整卡可点一眼看懂 */
+.open-hint {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--accent-text);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.22s var(--ease-out), transform 0.22s var(--ease-out);
+}
+.project-card:hover .open-hint,
+.project-card:focus-visible .open-hint { opacity: 1; transform: none; }

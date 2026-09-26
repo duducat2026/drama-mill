@@ -1,0 +1,240 @@
+/* Drama Mill — episode 工作台样式（自 episode.workbench.css 按组件归属机械拆分）
+   AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com> */
+
+.studio-topbar .btn { 
+  height: 26px;
+  padding: 0 9px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.step-empty { 
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1; min-height: 300px; gap: 10px; padding: 46px;
+  animation: fadeIn 0.3s var(--ease-out);
+}
+.empty-visual { 
+  width: 72px; height: 72px; border-radius: 22px;
+  background: var(--bg-1); color: var(--accent);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 8px;
+}
+.empty-title {  font-size: 22px; font-weight: 700; font-family: var(--font-display); color: var(--text-0);
+}
+.empty-desc {  font-size: 13px; color: var(--text-2); max-width: 420px; text-align: center; line-height: 1.8;
+}
+.video-task-title { 
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 850;
+  color: var(--text-0);
+}
+.video-task-meta { 
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-3);
+}
+.video-task-metrics { 
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.video-task-metric { 
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 999px;
+  background: rgba(0,0,0,0.04);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.video-task-metric.is-done { 
+  color: var(--success);
+  border-color: rgba(52,199,89,0.32);
+  background: var(--success-bg);
+}
+.video-task-metric.is-pending { 
+  color: var(--accent-text);
+  border-color: var(--accent-glow);
+  background: var(--accent-bg);
+}
+.video-task-metric.is-failed { 
+  color: var(--warning);
+  border-color: rgba(255,159,10,0.32);
+  background: var(--warning-bg);
+}
+.video-task-metric.is-queued { 
+  color: var(--text-2);
+  border-color: var(--surface-outline);
+  background: rgba(0,0,0,0.05);
+}
+.gen-task-retry-btn {  flex-shrink: 0;
+}
+.video-task-table { 
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.video-task-preview { 
+  position: relative;
+  width: 84px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--surface-outline);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.video-task-preview video,
+.video-task-preview img { 
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.video-task-empty { 
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.video-task-index { 
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.56);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+.video-task-main { 
+  min-width: 0;
+}
+.video-task-line { 
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.video-task-name { 
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-0);
+}
+.video-task-meta-line { 
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.video-task-loc { 
+  color: var(--text-2);
+}
+.video-task-sep {  color: var(--text-3); opacity: 0.5;
+}
+.video-task-error { 
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--error);
+}
+.prod-actions .btn {  flex: 1; justify-content: center;
+}
+.merge-card-meta .btn {  margin-left: auto;
+}
+.merge-card-meta .btn + .btn {  margin-left: 0;
+}
+@media (max-width: 1080px) { .video-task-metrics {
+
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+}}
+@media (max-width: 1080px) { .video-task-preview {
+
+    width: 84px;
+}}
+.gen-task-row .video-task-preview img { 
+  cursor: zoom-in;
+}
+.task-drawer-overlay { 
+  position: fixed;
+  inset: 0;
+  z-index: 118;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0,0,0,0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: fadeIn 0.18s var(--ease-out);
+}
+.task-drawer { 
+  width: min(560px, 100vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-xl);
+  animation: taskDrawerIn 0.22s var(--ease-out);
+}
+.task-drawer-head { 
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+}
+.task-drawer-head-actions { 
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.task-drawer-metrics { 
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+}
+.task-drawer-body { 
+  flex: 1;
+  overflow-y: auto;
+}
+.task-drawer-empty { 
+  flex: 1;
+  justify-content: center;
+}
+.gen-task-pager { 
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--panel-border);
+}
+.gen-task-pager .btn:disabled {  opacity: 0.45; cursor: not-allowed;
+}
+.gen-task-pager-info {  font-size: 12px; color: var(--text-2); white-space: nowrap;
+}

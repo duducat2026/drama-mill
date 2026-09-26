@@ -1,0 +1,115 @@
+/*
+ * Drama Mill — AI 短剧自动化生产平台 (https://github.com/your-org/drama-mill)
+ * Copyright (C) 2026 Drama Mill <52859273@qq.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * 火山引擎 veImageX 图片生成 Adapter
+ * 端点: /api/v3/images/generations (注意 /api/v3 前缀)
+ * 响应格式: { data: [{ url: "..." }] }
+ */
+import type {
+  ImageProviderAdapter,
+  ProviderRequest,
+  AIConfig,
+  ImageGenerationRecord,
+  ImageGenResponse,
+  ImagePollResponse,
+} from './types'
+import { joinProviderUrl } from './url'
+
+export class VolcEngineImageAdapter implements ImageProviderAdapter {
+  provider = 'volcengine'
+
+  buildGenerateRequest(config: AIConfig, record: ImageGenerationRecord): ProviderRequest {
+    // 火山引擎使用 seedream 模型
+    const model = record.model || config.model || 'doubao-seedream-5-0-260128'
+
+    const body: any = {
+      model,
+      prompt: record.prompt,
+    }
+
+    // 尺寸参数
+    if (record.size) {
+      const [w, h] = record.size.split('x')
+      if (w && h) {
+        body.width = parseInt(w)
+        body.height = parseInt(h)
+      }
+    }
+
+    return {
+      url: joinProviderUrl(config.baseUrl, '/api/v3', '/images/generations'),
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body,
+    }
+  }
+
+  parseGenerateResponse(result: any): ImageGenResponse {
+    // 火山引擎可能返回 task_id 进行轮询
+    if (result.task_id || result.id) {
+      return { isAsync: true, taskId: result.task_id || result.id }
+    }
+    // 同步返回
+    const imageUrl = result.data?.[0]?.url || result.url
+    if (imageUrl) {
+      return { isAsync: false, imageUrl }
+    }
+    throw new Error('No image URL in response')
+  }
+
+  buildPollRequest(config: AIConfig, taskId: string): ProviderRequest {
+    return {
+      url: joinProviderUrl(config.baseUrl, '/api/v3', `/images/generations/${taskId}`),
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body: undefined,
+    }
+  }
+
+  parsePollResponse(result: any): ImagePollResponse {
+    const status = result.status
+    if (status === 'succeeded') {
+      return {
+        status: 'completed',
+        imageUrl: result.data?.[0]?.url || result.image_url,
+      }
+    }
+    if (status === 'failed') {
+      // 上游 error 可能是对象 { code, message }，规范成字符串
+      const err = result.error
+      const msg = typeof err === 'string' ? err : (err?.message || JSON.stringify(err) || 'Generation failed')
+      const code = err && typeof err === 'object' && err.code ? `[${err.code}] ` : ''
+      return { status: 'failed', error: `${code}${msg}` }
+    }
+    return { status: status || 'processing' }
+  }
+
+  extractImageUrl(result: any): string | null {
+    return result.data?.[0]?.url || result.image_url || null
+  }
+
+  extractImageBase64(result: any): { data: string; mimeType: string } | null {
+    return null
+  }
+}

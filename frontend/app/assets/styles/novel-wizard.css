@@ -1,0 +1,142 @@
+/* NovelImportWizard.vue 的 scoped 样式外置（拆分超限文件；经 <style scoped src> 引用） */
+.wizard-dialog { width: 560px; max-width: calc(100vw - 32px); }
+.dialog-head-copy { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.dialog-desc { font-size: 12.5px; color: var(--text-3); }
+.wizard-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.step-track { display: flex; gap: 6px; }
+.step-dot {
+  width: 22px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--bg-2);
+  transition: background 0.2s var(--ease-out);
+}
+.step-dot.on { background: var(--accent); }
+.dialog-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dialog-body { display: flex; flex-direction: column; gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.required { color: var(--error); }
+.field-hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+.novel-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.tag-warn { background: var(--warn-bg, #fff4e0); color: var(--warn, #b26a00); }
+.target-input { width: 180px; }
+.split-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.split-error {
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background: var(--action-danger-bg);
+  color: var(--action-danger);
+  font-size: 13px;
+}
+.preview-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.preview-head {
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1);
+  background: var(--bg-2);
+  position: sticky;
+  top: 0;
+}
+.preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.preview-num { flex: 0 0 auto; font-weight: 700; color: var(--text-1); }
+.preview-title { flex: 1; color: var(--text-2); }
+.preview-chars { flex: 0 0 auto; color: var(--text-3); }
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+.check-row input { margin-top: 3px; }
+
+/* 执行方式：两步走单选卡（拆分与生产拆成两步） */
+.mode-picker { display: flex; flex-direction: column; gap: 8px; }
+.mode-option {
+  display: flex; align-items: flex-start; gap: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; cursor: pointer;
+  background: var(--surface-raised);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.mode-option:hover { border-color: var(--text-3); }
+.mode-option.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--button-focus);
+}
+.mode-option input { margin-top: 3px; }
+.mode-copy { display: flex; flex-direction: column; gap: 2px; }
+.mode-name { font-size: 13px; font-weight: 600; color: var(--text-1); }
+.mode-rec {
+  font-size: 10.5px; font-weight: 700; color: var(--accent);
+  background: var(--button-focus); border-radius: var(--radius-pill);
+  padding: 1px 7px; margin-left: 6px; vertical-align: 1px;
+}
+.mode-desc { font-size: 12px; color: var(--text-3); line-height: 1.5; }
+.batch-file-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 160px;
+  overflow-y: auto;
+}
+.batch-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  border-top: 1px solid var(--border);
+}
+.batch-file-row:first-child { border-top: none; }
+.batch-file-seq {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.batch-file-name { flex: 1; color: var(--text-1); }
+.batch-file-size { flex: 0 0 auto; color: var(--text-3); font-size: 11.5px; }
+.batch-tip { font-size: 11px; color: var(--text-3); line-height: 1.6; margin: 0; }

@@ -1,0 +1,21 @@
+{
+  "name": "drama-mill-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Drama Mill",
+  "license": "AGPL-3.0-only",
+  "description": "Drama Mill 部署脚本（本地与云端通用，不依赖 Docker）",
+  "scripts": {
+    "deploy": "bash deployment/deploy.sh",
+    "deploy:backend": "bash deployment/deploy.sh --backend-only",
+    "deploy:frontend": "bash deployment/deploy.sh --frontend-only",
+    "publish": "bash deployment/deploy-remote.sh",
+    "publish:backend": "bash deployment/deploy-remote.sh --backend-only",
+    "publish:frontend": "bash deployment/deploy-remote.sh --frontend-only",
+    "build": "bash deployment/deploy.sh --build-only",
+    "start": "pm2 start ecosystem.config.cjs",
+    "stop": "pm2 stop ecosystem.config.cjs",
+    "restart": "pm2 restart ecosystem.config.cjs",
+    "logs": "pm2 logs drama-mill --lines 100"
+  }
+}

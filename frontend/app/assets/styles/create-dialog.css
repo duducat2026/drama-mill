@@ -1,0 +1,37 @@
+/*
+ * create-dialog.css — ProjectCreateDialog.vue 专属样式（scoped 挂在组件自身）。
+ * 组件拆分后父页（index.vue）的 scoped 样式无法穿透子组件内部元素，表单样式必须随组件走；
+ * .overlay / .dialog / .dialog-head / .dialog-foot 骨架仍由全局 studio.css 提供。
+ */
+.create-dialog { width: 460px; max-width: calc(100vw - 32px); }
+.dialog-head-copy { display: flex; flex-direction: column; gap: 2px; }
+.dialog-desc { font-size: 12.5px; color: var(--text-3); }
+.modal-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.dialog-body { display: flex; flex-direction: column; gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.required { color: var(--error); }
+.field-hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+@media (max-width: 760px) {
+  .field-row { grid-template-columns: 1fr; }
+  .dialog-foot { flex-direction: column-reverse; }
+  .dialog-foot .btn { width: 100%; }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "drama-mill-frontend",
+  "private": true,
+  "author": "Drama Mill",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev --port 3013",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "test": "node --test 'tests/*.test.mjs'",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "lucide-vue-next": "^0.511.0",
+    "nuxt": "^3.17.5",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.1",
+    "vue-sonner": "^1.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^5.8.3"
+  },
+  "allowScripts": {
+    "esbuild@0.27.4": true,
+    "@parcel/watcher@2.5.6": true
+  }
+}

@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 环境配置：仅公开示例，排除本机、生产与历史副本
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# 敏感文件（数据库密码等临时文件）
+.dbpass.tmp
+.rescue-historical.sh
+
+# 数据库备份与 IDE 本地配置（不入库）
+backups/
+.qoder/
+
+# 历史归档与密钥（不论存放位置均不入库）
+*.bundle
+*.sql.gz
+*.dump
+*.bak
+*.bak.*
+*.backup
+*.backup.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 小说素材（本地/部署数据，不入库）
+/drama/
+
+# 构建产物软链
+backend/dist
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (database and uploaded files)
+data/drama_generator.db
+data/drama_generator.db-wal
+data/drama_generator.db-shm
+data/drama_mill.db
+data/drama_mill.db-wal
+data/drama_mill.db-shm
+data/public.sql
+data/*.bak*
+data/static/
+data/storage/
+
+# Config
+configs/config.yaml
+
+# Misc
+tmp/
+temp/
+.superpowers/
+/CLAUDE.md
+/AGENTS.md
+
+# Agent workspace (skills 保持跟踪，其余产出忽略)
+backend/workspace/*
+!backend/workspace/skills/

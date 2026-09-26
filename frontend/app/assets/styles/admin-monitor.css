@@ -1,0 +1,67 @@
+/* admin/monitor.vue 运行监控样式外置（拆分超限文件；经父页非 scoped <style src> 全局引用，
+   AdminMonitorCharts 子组件复用同一套 monitor-* 类） */
+.monitor-updated { font-size: 11.5px; color: var(--text-3); }
+
+.monitor-charts { display: grid; grid-template-columns: 3fr 2fr; gap: 14px; margin-bottom: 14px; }
+@media (max-width: 980px) { .monitor-charts { grid-template-columns: 1fr; } }
+
+.monitor-card {
+  background: #fff; border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px; min-width: 0;
+}
+.monitor-card-grow { min-width: 0; }
+.monitor-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.monitor-card-title { font-size: 13px; font-weight: 700; color: var(--text-0); }
+
+.monitor-legend { display: flex; gap: 12px; }
+.monitor-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); }
+.monitor-legend-item i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+.monitor-svg { width: 100%; height: auto; display: block; }
+.monitor-grid { stroke: rgba(0,0,0,0.06); stroke-width: 1; }
+.monitor-axis-line { stroke: rgba(0,0,0,0.12); stroke-width: 1; }
+.monitor-axis { font-size: 10px; fill: var(--text-3); }
+
+.monitor-donut-wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.monitor-donut { width: 132px; height: 132px; flex-shrink: 0; }
+.monitor-donut-num { font-size: 20px; font-weight: 700; fill: var(--text-0); }
+.monitor-donut-sub { font-size: 9px; fill: var(--text-3); }
+.monitor-donut-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 150px; }
+.monitor-donut-legend li { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.monitor-donut-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.monitor-donut-label { color: var(--text-1); flex: 1; }
+.monitor-donut-count { font-weight: 600; color: var(--text-0); font-variant-numeric: tabular-nums; }
+.monitor-donut-pct { color: var(--text-3); font-size: 11px; width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.monitor-errs { display: flex; flex-direction: column; gap: 9px; }
+.monitor-err-row { display: grid; grid-template-columns: 110px 1fr 52px; align-items: center; gap: 10px; }
+.monitor-err-label { font-size: 12px; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monitor-err-count { font-size: 12px; font-weight: 600; color: var(--text-0); text-align: right; font-variant-numeric: tabular-nums; }
+
+.monitor-bar { height: 8px; border-radius: 99px; background: var(--bg-2, #f0f0f3); overflow: hidden; }
+.monitor-bar-sm { height: 5px; margin-top: 6px; }
+.monitor-bar-fill { height: 100%; border-radius: 99px; background: var(--accent, #0071e3); transition: width 0.4s var(--ease-out, ease-out); }
+.monitor-bar-green { background: #34c759; }
+.monitor-bar-warn { background: #ff9500; }
+.monitor-bar-red { background: #ff3b30; }
+
+.monitor-batches { display: flex; flex-direction: column; gap: 10px; }
+
+/* 存储配额超额告警横幅 */
+.monitor-quota-alert {
+  margin-top: 14px; padding: 12px 14px;
+  border: 1px solid rgba(215, 0, 21, 0.35);
+  border-left: 4px solid var(--action-danger, #d70015);
+  border-radius: 10px;
+  background: rgba(215, 0, 21, 0.05);
+}
+.monitor-quota-alert-head { font-size: 13px; font-weight: 700; color: var(--action-danger, #d70015); margin-bottom: 8px; }
+.monitor-quota-alert-list { display: flex; flex-direction: column; gap: 5px; }
+.monitor-quota-alert-item { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
+.monitor-quota-alert-name { font-weight: 600; color: var(--text-1); min-width: 90px; }
+.monitor-quota-alert-detail { color: var(--text-2, #6e6e73); }
+.monitor-batch-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.monitor-batch-cap { font-size: 12px; color: var(--text-3); width: 34px; flex-shrink: 0; }

@@ -1,0 +1,177 @@
+.base-select {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.base-select-trigger {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: var(--button-height);
+  padding: 0 30px 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  color: var(--button-text);
+  background: var(--button-bg);
+  border: 1px solid var(--button-border);
+  border-radius: var(--button-radius);
+  cursor: pointer;
+  transition: all 0.18s var(--ease-out);
+  white-space: nowrap;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  flex-shrink: 0;
+  box-shadow: var(--button-shadow);
+}
+.base-select-trigger:hover {
+  border-color: var(--button-border-hover);
+  background: var(--button-bg-hover);
+  color: var(--button-text-hover);
+  box-shadow: var(--button-shadow-hover);
+}
+.base-select-trigger.open {
+  border-color: var(--action-primary);
+  box-shadow: 0 0 0 3px var(--button-focus), var(--button-shadow-hover);
+  background: var(--button-bg-hover);
+}
+.base-select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--action-primary);
+  box-shadow: 0 0 0 3px var(--button-focus), var(--button-shadow-hover);
+}
+.base-select-trigger .placeholder {
+  color: var(--text-3);
+  font-weight: 300;
+}
+.base-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.base-select-arrow {
+  margin-left: auto;
+  color: var(--text-2);
+  transition: transform 0.2s var(--ease-out);
+  flex-shrink: 0;
+}
+.base-select-trigger.open .base-select-arrow {
+  transform: rotate(180deg);
+}
+
+/* Dropdown */
+.base-select-dropdown {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  z-index: 9999;
+  animation: baseSelectIn 0.15s var(--ease-out);
+}
+
+.base-select-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+.base-select-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  font-family: var(--font-body);
+  color: var(--text-0);
+}
+.base-select-search-input::placeholder {
+  color: var(--text-3);
+}
+
+.base-select-options {
+  overflow-y: auto;
+  max-height: 260px;
+  padding: 4px;
+}
+
+.base-select-group-label {
+  padding: 6px 10px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+.base-select-group-label:first-child {
+  margin-top: 0;
+}
+
+.base-select-option {
+  appearance: none;
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  color: var(--text-1);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.14s var(--ease-out), color 0.14s var(--ease-out), box-shadow 0.14s var(--ease-out);
+  word-break: break-all;
+}
+.base-select-option:hover,
+.base-select-option.highlighted {
+  background: var(--bg-hover);
+  color: var(--text-0);
+}
+.base-select-option:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+  color: var(--text-0);
+  box-shadow: inset 0 0 0 1px var(--action-primary), 0 0 0 2px var(--button-focus);
+}
+.base-select-option.selected {
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.base-select-empty {
+  padding: 16px 12px;
+  font-size: 13px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.base-select-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+}
+
+@keyframes baseSelectIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.base-select-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

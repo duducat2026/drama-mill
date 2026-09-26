@@ -1,0 +1,233 @@
+.page {
+  position: relative;
+  padding: 40px 48px 64px;
+  overflow-y: auto;
+  height: 100%;
+  animation: fadeUp 0.35s var(--ease-out) both;
+  background: var(--surface-base);
+}
+/* 页首氛围光：两抹极淡的系统蓝晕开在 hero 背后 */
+.page::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 460px;
+  background:
+    radial-gradient(46% 60% at 16% 0%, rgba(0, 113, 227, 0.09), transparent 72%),
+    radial-gradient(38% 55% at 84% 4%, rgba(90, 200, 250, 0.11), transparent 72%);
+  pointer-events: none;
+}
+
+.launcher-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  padding: var(--sp-4) 0 var(--sp-6);
+}
+.head-left { display: flex; flex-direction: column; }
+.hero-actions { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+/* 等宽字小标 + 呼吸圆点：机器感的“在线”信号 */
+.launcher-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: var(--sp-3);
+  font: 600 10.5px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  color: var(--accent-text);
+}
+.eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: eyebrow-ping 2.6s var(--ease-out) infinite;
+}
+@keyframes eyebrow-ping {
+  0% { box-shadow: 0 0 0 0 rgba(0, 113, 227, 0.35); }
+  55%, 100% { box-shadow: 0 0 0 9px rgba(0, 113, 227, 0); }
+}
+.launcher-title {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  color: var(--text-0);
+}
+.launcher-sub { color: var(--text-2); font-size: 14px; margin-top: 5px; }
+.hero-stats { display: flex; gap: var(--sp-2); margin-top: var(--sp-4); flex-wrap: wrap; }
+/* 统计芯片：底色/描边从各自状态色淡染而来（tag-success 绿、tag-error 红…） */
+.hero-stats .tag {
+  background: color-mix(in srgb, currentColor 8%, #ffffff);
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  box-shadow: var(--shadow-xs);
+  font-weight: 650;
+  padding: 4px 11px;
+}
+
+/* 工具栏粘顶 + 毛玻璃：长列表滚动时搜索/筛选常驻，如原生 App */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0 -48px var(--sp-5);
+  padding: 10px 48px 12px;
+  background: color-mix(in srgb, var(--surface-base) 74%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+.search-box { position: relative; width: 260px; flex: 0 0 auto; }
+.search-box svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+.search-box .input {
+  padding-left: 34px;
+  border-radius: var(--radius-pill);
+  border-color: var(--border);
+  background: rgba(0, 0, 0, 0.04);
+}
+.search-box .input:focus { background: #fff; }
+.chip-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 1px; }
+.filter-chip {
+  appearance: none;
+  cursor: pointer;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.16s var(--ease-out);
+}
+.filter-chip:hover { color: var(--text-0); background: rgba(0, 0, 0, 0.08); }
+.filter-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3.5px var(--button-focus);
+}
+.filter-chip.on { background: var(--text-0); color: #fff; }
+.sort-select {
+  margin-left: auto;
+  width: auto;
+  min-width: 132px;
+  min-height: 36px;
+  border-radius: var(--radius-pill);
+  border-color: var(--border);
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-1);
+}
+.sort-select:focus { background: #fff; }
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: var(--sp-5);
+}
+/* 卡片根元素：根节点同时携带父作用域属性，此三条规则在页面级 scoped 下仍可命中；
+   卡片内部（封面/徽标/菜单/正文/底栏）样式见 project-card.css（随 ProjectCard.vue 挂载） */
+.project-card {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  animation: fadeUp 0.32s var(--ease-out) both;
+}
+.project-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lift); }
+.project-card:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--button-focus);
+}
+
+.skeleton-card { overflow: hidden; }
+.skeleton-cover {
+  aspect-ratio: 16 / 9;
+  background: var(--bg-2);
+  animation: skeleton-pulse 1.4s ease-in-out infinite alternate;
+}
+.skeleton-body { padding: var(--sp-4); display: grid; gap: 10px; }
+.skeleton-line {
+  height: 12px;
+  border-radius: 99px;
+  background: var(--bg-2);
+  animation: skeleton-pulse 1.4s ease-in-out infinite alternate;
+}
+.skeleton-line.w-60 { width: 60%; }
+.skeleton-line.w-40 { width: 40%; }
+@keyframes skeleton-pulse { to { opacity: 0.55; } }
+
+.empty-state {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  text-align: center;
+}
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-bg);
+  border: 1px solid rgba(0, 113, 227, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.empty-title { font-size: 14px; font-weight: 700; color: var(--text-1); }
+.empty-desc { font-size: 12px; color: var(--text-3); max-width: 240px; line-height: 1.6; }
+
+.list-pager {
+  margin-top: var(--sp-4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+}
+.list-pager .btn { min-width: 72px; }
+.list-pager .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pager-info { font-size: 12px; color: var(--text-2); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .page { padding: 24px 16px 40px; }
+  .launcher-hero {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-4);
+  }
+  .launcher-hero .btn { width: 100%; }
+  .toolbar { flex-wrap: wrap; margin-inline: -16px; padding-inline: 16px; }
+  .search-box { width: 100%; flex: 1 1 100%; }
+  .sort-select { margin-left: 0; flex: 1; }
+}
+
+/* 存储配额超额告警横幅 */
+.quota-alert {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 14px; margin: 14px 0 2px;
+  border: 1px solid rgba(255, 59, 48, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 59, 48, 0.07);
+  color: #c22b21;
+  font-size: 12.5px; line-height: 1.6;
+}
+.quota-alert svg { flex-shrink: 0; margin-top: 3px; }
+.quota-alert b { font-weight: 700; }

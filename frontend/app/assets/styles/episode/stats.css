@@ -1,0 +1,44 @@
+/* Drama Mill — episode 工作台样式（自 episode.workbench.css 按组件归属机械拆分）
+   AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com> */
+
+.ep-stat-mask { 
+  position: fixed; inset: 0; z-index: 120;
+  background: rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center;
+}
+.ep-stat-modal { 
+  width: min(640px, 92vw); max-height: 82vh; overflow-y: auto;
+  background: #fff; border-radius: 14px; padding: 20px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+  font-size: 12.5px;
+}
+.ep-stat-title { 
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 14px; font-weight: 700; color: var(--text-0); margin-bottom: 12px;
+}
+.ep-stat-close {  background: none; border: none; cursor: pointer; color: var(--text-3); font-size: 13px;
+}
+.ep-stat-table {  width: 100%; border-collapse: collapse;
+}
+.ep-stat-table th { 
+  text-align: left; padding: 7px 10px; font-size: 11px; color: var(--text-3);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.ep-stat-table td {  padding: 7px 10px; color: var(--text-1); border-bottom: 1px solid var(--border);
+}
+.ep-stat-foot { 
+  display: flex; justify-content: space-between; margin-top: 10px;
+  font-size: 11.5px; color: var(--text-3);
+}
+.ep-stat-total {  font-weight: 700; color: var(--text-0);
+}
+.ep-stat-cards {  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;
+}
+.ep-stat-card {  background: rgba(0,0,0,0.025); border-radius: 10px; padding: 10px 12px;
+}
+.ep-stat-card-label {  font-size: 11px; color: var(--text-3);
+}
+.ep-stat-card-value {  font-size: 17px; font-weight: 700; color: var(--text-0); margin-top: 3px;
+}
+.ep-stat-empty {  padding: 24px 0; text-align: center; color: var(--text-3);
+}

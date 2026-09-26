@@ -1,0 +1,79 @@
+/* Drama Mill — episode 工作台样式（自 episode.workbench.css 按组件归属机械拆分）
+   AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com> */
+
+.studio-topbar .btn { 
+  height: 26px;
+  padding: 0 9px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.content-panel {  flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; min-height: 0;
+}
+.step-toolbar { 
+  display: flex; align-items: center; gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  background: var(--surface-raised); flex-shrink: 0;
+}
+.toolbar-left {  display: flex; align-items: center; gap: 8px; flex: 1;
+}
+.toolbar-right {  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.step-indicator {  display: flex; align-items: center; gap: 8px;
+}
+.step-num { 
+  width: 26px; height: 26px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-bg);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 800; color: var(--accent-text); letter-spacing: 0.05em;
+}
+.step-name {  font-size: 12.5px; font-weight: 700; color: var(--text-1); font-family: var(--font-display);
+}
+.char-count {  font-size: 11px; color: var(--text-3); font-family: var(--font-mono);
+}
+.step-editor {  flex: 1; display: flex; flex-direction: column; min-height: 0;
+}
+.fill-textarea { 
+  flex: 1; border: none; border-radius: 0; padding: 26px 28px;
+  font-size: 13.5px; line-height: 1.9; resize: none; outline: none;
+  font-family: var(--font-body); background: var(--bg-input); color: var(--text-0);
+}
+.fill-textarea:focus {  box-shadow: none;
+}
+.step-empty { 
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1; min-height: 300px; gap: 10px; padding: 46px;
+  animation: fadeIn 0.3s var(--ease-out);
+}
+.empty-visual { 
+  width: 72px; height: 72px; border-radius: 22px;
+  background: var(--bg-1); color: var(--accent);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 8px;
+}
+.empty-title {  font-size: 22px; font-weight: 700; font-family: var(--font-display); color: var(--text-0);
+}
+.empty-desc {  font-size: 13px; color: var(--text-2); max-width: 420px; text-align: center; line-height: 1.8;
+}
+.step-empty-actions {  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+}
+.step-loading { 
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1; gap: 12px;
+}
+.loading-text {  font-size: 13px; color: var(--text-2);
+}
+.prod-actions .btn {  flex: 1; justify-content: center;
+}
+.merge-card-meta .btn {  margin-left: auto;
+}
+.merge-card-meta .btn + .btn {  margin-left: 0;
+}
+.gen-task-pager .btn:disabled {  opacity: 0.45; cursor: not-allowed;
+}
+@media (max-width: 860px) { .toolbar-right {
+
+    flex-wrap: wrap;
+}}

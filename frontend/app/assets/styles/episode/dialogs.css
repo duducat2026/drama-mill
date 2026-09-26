@@ -1,0 +1,353 @@
+/* Drama Mill — episode 工作台样式（自 episode.workbench.css 按组件归属机械拆分）
+   AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com> */
+
+.studio-topbar .btn { 
+  height: 26px;
+  padding: 0 9px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.sb-duration-input .input {  width: 56px; height: 30px; padding: 4px 8px; font-size: 12.5px;
+}
+.storyboard-editor-scroll .sb-split .field {  flex: 1; min-height: 0;
+}
+.storyboard-editor-scroll .sb-split .field .textarea {  flex: 1; min-height: 64px; resize: vertical;
+}
+.field {  display: flex; flex-direction: column; gap: 5px;
+}
+.field-label {  font-size: 12px; font-weight: 500; color: var(--text-1);
+}
+.asset-create-dialog {  width: 440px; max-width: calc(100vw - 48px);
+}
+.asset-create-body {  display: flex; flex-direction: column; gap: 10px;
+}
+.previewable-image {  cursor: zoom-in; transition: transform 0.18s var(--ease-out), filter 0.18s var(--ease-out);
+}
+.previewable-image:hover {  transform: scale(1.015); filter: saturate(1.04);
+}
+.prod-actions .btn {  flex: 1; justify-content: center;
+}
+.asset-detail-overlay { 
+  z-index: 118;
+  padding: 28px;
+}
+.asset-detail-dialog { 
+  width: min(1040px, calc(100vw - 56px));
+  max-height: calc(100vh - 56px);
+}
+.asset-detail-head { 
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+}
+.asset-detail-title-block { 
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.asset-detail-kicker { 
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.asset-detail-title { 
+  margin: 0;
+  color: var(--text-0);
+  font-size: 18px;
+  line-height: 1.2;
+  font-family: var(--font-display);
+}
+.asset-detail-head-actions { 
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.asset-detail-body { 
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+.asset-detail-shell { 
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.asset-detail-preview-panel,
+.asset-detail-editor-panel { 
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.asset-detail-preview-panel { 
+  position: sticky;
+  top: 0;
+}
+.asset-detail-section-title { 
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 820;
+  letter-spacing: 0.02em;
+}
+.asset-detail-section-title .dim { 
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0;
+  text-align: right;
+}
+.asset-detail-media-frame { 
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+  padding: 0;
+  border: 1px solid var(--surface-outline);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--text-3);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+.asset-detail-media-frame:disabled { 
+  cursor: default;
+  opacity: 1;
+}
+.asset-detail-media-frame:focus-visible { 
+  outline: none;
+  border-color: var(--action-primary);
+  box-shadow: 0 0 0 3px var(--button-focus);
+}
+.asset-detail-media-frame img { 
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.asset-detail-media-empty { 
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.asset-detail-edit-field span { 
+  display: block;
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.04em;
+}
+.asset-detail-edit-grid { 
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.asset-detail-edit-field { 
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.asset-detail-textarea { 
+  min-height: 138px;
+  resize: vertical;
+}
+.asset-detail-edit-grid--character .asset-detail-textarea,
+.asset-detail-edit-grid--scene .asset-detail-textarea { 
+  min-height: 164px;
+}
+.asset-detail-meta-row { 
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.asset-detail-meta-item { 
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--surface-outline);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+.asset-detail-meta-item span { 
+  display: block;
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.04em;
+}
+.asset-detail-meta-item strong { 
+  display: block;
+  margin-top: 4px;
+  min-width: 0;
+  color: var(--text-0);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-detail-foot { 
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--surface-outline);
+}
+.asset-detail-secondary-actions,
+.asset-detail-primary-actions { 
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.asset-detail-prompt-panel { 
+  min-width: 0;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--surface-outline);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.asset-detail-prompt-head-actions { 
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.asset-detail-copy-btn { 
+  gap: 5px;
+}
+.asset-detail-prompt-textarea { 
+  min-height: 96px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--surface-outline);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  resize: vertical;
+  width: 100%;
+}
+.asset-detail-prompt-hint { 
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.asset-detail-readonly p.dim { 
+  color: var(--text-3);
+}
+.image-viewer-overlay { 
+  z-index: 120;
+  padding: 28px;
+}
+.image-viewer-dialog { 
+  width: min(1100px, calc(100vw - 56px));
+  max-height: calc(100vh - 56px);
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+.image-viewer-head { 
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--surface-outline);
+}
+.image-viewer-title { 
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-family: var(--font-display);
+}
+.image-viewer-body { 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: auto;
+  min-height: 0;
+}
+.image-viewer-img { 
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.18);
+  background: var(--surface-muted);
+}
+.merge-card-meta .btn {  margin-left: auto;
+}
+.merge-card-meta .btn + .btn {  margin-left: 0;
+}
+.merge-viewer-dialog {  width: min(1080px, calc(100vw - 56px));
+}
+.merge-viewer-body { 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  min-height: 0;
+}
+.merge-viewer-video { 
+  width: 100%;
+  max-height: calc(100vh - 220px);
+  border-radius: var(--radius);
+  background: #000;
+  display: block;
+}
+.dim {  color: var(--text-3);
+}
+@media (max-width: 1080px) { .image-viewer-overlay {
+
+    padding: 16px;
+}}
+@media (max-width: 1080px) { .image-viewer-dialog {
+
+    width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+}}
+@media (max-width: 1080px) { .asset-detail-overlay {
+
+    padding: 16px;
+}}
+@media (max-width: 1080px) { .asset-detail-dialog {
+
+    width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+}}
+@media (max-width: 1080px) { .asset-detail-shell {
+
+    grid-template-columns: 1fr;
+}}
+@media (max-width: 1080px) { .asset-detail-preview-panel {
+
+    position: static;
+}}
+@media (max-width: 1080px) { .asset-detail-edit-grid {
+
+    grid-template-columns: 1fr;
+}}
+.gen-task-pager .btn:disabled {  opacity: 0.45; cursor: not-allowed;
+}

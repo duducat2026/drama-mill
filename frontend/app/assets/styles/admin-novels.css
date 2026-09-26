@@ -1,0 +1,31 @@
+/* admin/novels.vue 小说管理页 scoped 样式外置（拆分超限文件；父页与 AdminNovelSplitTemplates 子组件共用同一全局类，各自 <style scoped src> 引用） */
+.admin-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: #fff;
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
+  cursor: pointer; transition: all 0.15s var(--ease-out);
+}
+.admin-tab:hover { color: var(--text-0); }
+.admin-tab.active { background: var(--text-0); border-color: var(--text-0); color: #fff; }
+
+.dim { color: var(--text-3); }
+.ml-auto { margin-left: auto; }
+
+.novel-preview-dialog, .tpl-form-dialog { width: 720px; max-width: calc(100vw - 32px); }
+.novel-preview-body { white-space: pre-wrap; font-size: 13px; line-height: 1.9; color: var(--text-1); max-height: 60vh; overflow-y: auto; }
+
+.novel-dramas-dialog { width: 560px; max-width: calc(100vw - 32px); }
+.drama-list { display: flex; flex-direction: column; gap: 8px; }
+.drama-row {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px;
+}
+
+.tpl-form-body { display: flex; flex-direction: column; gap: 12px; }
+.tpl-form-row { display: flex; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.required { color: var(--error); }
+.check-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--text-1); line-height: 1.5; }
+.check-row input { margin-top: 2px; }
