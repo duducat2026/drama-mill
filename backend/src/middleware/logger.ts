@@ -1,5 +1,5 @@
 /*
- * Drama Mill — AI 短剧自动化生产平台 (https://github.com/your-org/drama-mill)
+ * Drama Mill — AI 短剧自动化生产平台 (https://github.com/duducat2026/drama-mill)
  * Copyright (C) 2026 Drama Mill <52859273@qq.com>
  *
  * This program is free software: you can redistribute it and/or modify

@@ -4,6 +4,7 @@
   "private": true,
   "author": "Drama Mill",
   "license": "AGPL-3.0-only",
+  "repository": { "type": "git", "url": "git+https://github.com/duducat2026/drama-mill.git" },
   "description": "Drama Mill 一键部署入口：本地 build/start 与云端 publish（PM2，免 Docker）",
   "scripts": {
     "deploy": "bash deployment/deploy.sh",

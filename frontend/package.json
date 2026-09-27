@@ -5,6 +5,7 @@
   "description": "Drama Mill 前端：Nuxt 3 + Vue 3，纯 CSS 无组件库",
   "author": "Drama Mill",
   "license": "AGPL-3.0-only",
+  "repository": { "type": "git", "url": "git+https://github.com/duducat2026/drama-mill.git" },
   "type": "module",
   "scripts": {
     "dev": "nuxt dev --port 3013",

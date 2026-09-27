@@ -6,6 +6,7 @@
   "main": "src/index.ts",
   "author": "Drama Mill",
   "license": "AGPL-3.0-only",
+  "repository": { "type": "git", "url": "git+https://github.com/duducat2026/drama-mill.git" },
   "keywords": ["drama-mill", "ai", "short-drama", "hono", "mastra", "drizzle"],
   "scripts": {
     "dev": "tsx watch src/index.ts",

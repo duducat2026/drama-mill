@@ -168,7 +168,7 @@ nginx/                       — 反向代理模板（SSE 关缓冲、/static �
 ### 📥 安装依赖
 
 ```bash
-git clone <你的仓库地址> && cd drama-mill
+git clone https://github.com/duducat2026/drama-mill.git && cd drama-mill
 
 cd backend && npm install
 cd ../frontend && npm install
