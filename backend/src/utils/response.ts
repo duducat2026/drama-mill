@@ -16,28 +16,44 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 统一响应信封：{ code, data, message }，HTTP 状态与 code 字段保持一致。
+ * 前端 useApi 按该结构解包，勿随意改字段名。
+ */
 import type { Context } from 'hono'
 
+/** 成功信封：始终带 data 字段 */
+function ok(c: Context, code: number, message: string, data: any, httpStatus?: number) {
+  const body = { code, data, message }
+  return httpStatus ? c.json(body, httpStatus as any) : c.json(body)
+}
+
+/** 失败信封：只回 code+message，不带 data 键（与历史行为一致） */
+function fail(c: Context, code: number, message: string) {
+  return c.json({ code, message }, code as any)
+}
+
 export function success(c: Context, data: any = null) {
-  return c.json({ code: 200, data, message: 'success' })
+  return ok(c, 200, 'success', data)
 }
 
 export function created(c: Context, data: any = null) {
-  return c.json({ code: 201, data, message: 'created' }, 201)
+  return ok(c, 201, 'created', data, 201)
 }
 
 export function badRequest(c: Context, message = 'bad request') {
-  return c.json({ code: 400, message }, 400)
+  return fail(c, 400, message)
 }
 
 export function notFound(c: Context, message = 'not found') {
-  return c.json({ code: 404, message }, 404)
+  return fail(c, 404, message)
 }
 
 export function serverError(c: Context, message = 'internal error') {
-  return c.json({ code: 500, message }, 500)
+  return fail(c, 500, message)
 }
 
+/** ISO 时间戳：落库 updatedAt/completedAt 等字段的统一来源 */
 export function now() {
   return new Date().toISOString()
 }

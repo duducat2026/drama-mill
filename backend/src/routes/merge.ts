@@ -16,6 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 成片拼接接口：发起拼接 / 最新状态 / 成片列表 / 删除成片
+ * 删除 = 记录软删 + 物理文件立即回收（成片占磁盘大）+ 解除剧集播放引用
+ */
 import { Hono } from 'hono'
 import fs from 'node:fs'
 import { and, eq, isNull } from 'drizzle-orm'
@@ -29,6 +33,18 @@ import { getEpisodeOwned } from '../services/ownership.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
+
+/** 该集未删除的拼接记录（按 id 升序，取尾即最新） */
+function liveMerges(episodeId: number) {
+  return db.select().from(schema.videoMerges)
+    .where(and(eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt)))
+}
+
+/** 列表行附建成片字节数 */
+const withMergedSize = (m: typeof schema.videoMerges.$inferSelect) => ({
+  ...toSnakeCase(m),
+  merged_size: localFileSize(m.mergedUrl),
+})
 
 // POST /episodes/:id/merge — 拼接镜头视频(body.storyboard_ids 可选,只拼所选)
 app.post('/episodes/:id/merge', async (c) => {
@@ -60,25 +76,22 @@ app.get('/episodes/:id/merge', async (c) => {
   const user = c.get('user')
   const episodeId = Number(c.req.param('id'))
   await getEpisodeOwned(episodeId, user)
-  const merges = await db.select().from(schema.videoMerges)
-    .where(and(eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt)))
-
+  const merges = await liveMerges(episodeId)
 
   const latest = merges[merges.length - 1]
   if (!latest) return success(c, null)
 
-  return success(c, { ...toSnakeCase(latest), merged_size: localFileSize(latest.mergedUrl) })
+  return success(c, withMergedSize(latest))
 })
 
-// GET /episodes/:id/merges — 成片列表(全部拼接记录,新的在前)
+// GET /episodes/:id/merges — 成片列表(全部拼接记录,新的在前,最多 30 条)
 app.get('/episodes/:id/merges', async (c) => {
   const user = c.get('user')
   const episodeId = Number(c.req.param('id'))
   await getEpisodeOwned(episodeId, user)
-  const merges = await db.select().from(schema.videoMerges)
-    .where(and(eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt)))
+  const merges = await liveMerges(episodeId)
   merges.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-  return success(c, merges.slice(0, 30).map(m => ({ ...toSnakeCase(m), merged_size: localFileSize(m.mergedUrl) })))
+  return success(c, merges.slice(0, 30).map(withMergedSize))
 })
 
 // DELETE /episodes/:id/merges/:mergeId — 删除成片（软删记录 + 物理移除成片与海报帧，释放磁盘）
@@ -106,10 +119,9 @@ app.delete('/episodes/:id/merges/:mergeId', async (c) => {
   }
 
   // 物理删除成片与海报帧（成片体积大，及时回收磁盘；文件缺失静默跳过）
-  if (merge.mergedUrl) {
-    for (const rel of [merge.mergedUrl, posterPathFor(merge.mergedUrl)]) {
-      try { fs.unlinkSync(getAbsolutePath(rel)) } catch { /* 文件可能已不存在 */ }
-    }
+  for (const rel of [merge.mergedUrl, merge.mergedUrl && posterPathFor(merge.mergedUrl)]) {
+    if (!rel) continue
+    try { fs.unlinkSync(getAbsolutePath(rel)) } catch { /* 文件可能已不存在 */ }
   }
   logTaskSuccess('MergeAPI', 'delete-merge', { mergeId, episodeId })
   return success(c)

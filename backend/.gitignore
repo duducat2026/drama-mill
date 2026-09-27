@@ -1,5 +1,7 @@
+# 后端本地产物：依赖与 tsc 编译输出（含声明/映射文件）
 node_modules/
 dist/
 *.js
+*.js.map
 *.d.ts
-*.map
+*.d.ts.map

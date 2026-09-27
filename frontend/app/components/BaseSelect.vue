@@ -16,41 +16,42 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 
+<!--
+  通用下拉选择器：药丸触发钮 + 可搜索浮层，兼容扁平与分组两种选项形态
+  浮层 Teleport 到 body 做 fixed 定位，样式整体外链 base-select.css
+-->
 <template>
-  <div class="base-select" ref="rootEl">
-    <!-- Trigger -->
-    <button type="button" class="base-select-trigger" :class="{ open: isOpen }" :disabled="disabled" @click="toggle">
-      <span :class="selectedLabel ? '' : 'placeholder'" class="base-select-label">{{ selectedLabel || placeholder }}</span>
+  <div ref="rootEl" class="base-select">
+    <button type="button" :disabled="disabled" :class="{ open: isOpen }" class="base-select-trigger" @click="toggle">
+      <span class="base-select-label" :class="pickedLabel ? '' : 'placeholder'">{{ pickedLabel || placeholder }}</span>
       <ChevronDown :size="13" class="base-select-arrow" />
     </button>
 
-    <!-- Dropdown -->
     <Teleport to="body">
-      <div v-if="isOpen" class="base-select-dropdown" :style="dropdownStyle" ref="dropdownEl">
-        <!-- Search -->
+      <div v-if="isOpen" class="base-select-backdrop" @click="close" />
+      <div v-if="isOpen" ref="dropdownEl" class="base-select-dropdown" :style="dropdownBox">
         <div v-if="searchable" class="base-select-search">
           <Search :size="12" />
           <input
             ref="searchInputEl"
-            v-model="searchQuery"
+            v-model="query"
+            type="text"
             class="base-select-search-input"
             placeholder="搜索..."
-            @keydown="onSearchKeydown"
+            @keydown="onSearchKey"
           />
         </div>
-
-        <!-- Options -->
-        <div class="base-select-options" ref="optionsEl">
-          <template v-if="flatOptions.length">
-            <template v-for="(group, gi) in filteredGroups" :key="gi">
-              <div v-if="group.label" class="base-select-group-label">{{ group.label }}</div>
+        <div ref="optionsEl" class="base-select-options">
+          <template v-if="flatList.length">
+            <template v-for="(grp, gIdx) in shownGroups" :key="gIdx">
+              <div v-if="grp.label" class="base-select-group-label">{{ grp.label }}</div>
               <button
-                v-for="(opt, oi) in group.options"
+                v-for="(opt, oIdx) in grp.options"
                 :key="opt.value"
                 type="button"
-                :class="['base-select-option', { selected: opt.value === modelValue, highlighted: highlightedIdx === getGlobalIdx(gi, oi) }]"
+                :class="['base-select-option', { selected: opt.value === modelValue, highlighted: highlight === toFlat(gIdx, oIdx) }]"
                 @click="pick(opt)"
-                @mousemove="highlightedIdx = getGlobalIdx(gi, oi)"
+                @mousemove="highlight = toFlat(gIdx, oIdx)"
               >{{ opt.label }}</button>
             </template>
           </template>
@@ -58,21 +59,17 @@
         </div>
       </div>
     </Teleport>
-
-    <!-- Backdrop -->
-    <Teleport to="body">
-      <div v-if="isOpen" class="base-select-backdrop" @click="isOpen = false" />
-    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, Search } from 'lucide-vue-next'
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
-  options: { type: Array, default: () => [] }, // [{ label, value, group? }, ...] or [{ label, group, options: [] }]
+  // [{ label, value, group? }] 扁平表，或 [{ label, options: [...] }] 分组表
+  options: { type: Array, default: () => [] },
   placeholder: { type: String, default: '请选择...' },
   searchable: { type: Boolean, default: true },
   disabled: { type: Boolean, default: false },
@@ -80,38 +77,37 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const isOpen = ref(false)
-const searchQuery = ref('')
 const rootEl = ref()
 const dropdownEl = ref()
 const searchInputEl = ref()
 const optionsEl = ref()
-const highlightedIdx = ref(-1)
-const dropdownStyle = ref({})
+const query = ref('')
+const highlight = ref(-1)
+const dropdownBox = ref({})
 
-// Normalize options: support both flat list and grouped format
+// 统一成分组形态：原生分组直接用，扁平表按 group 字段分桶；
+// 裸字符串选项按 label === value 归一
 const normalizedGroups = computed(() => {
   if (!props.options.length) return []
-  // Check if already grouped
   if (props.options[0]?.options) {
     return props.options.map(g => ({
       label: g.label || '',
       options: g.options.map(o => ({ label: o.label ?? o, value: o.value ?? o })),
     }))
   }
-  // Flat list with optional group property
-  const map = new Map()
+  const buckets = new Map()
   for (const o of props.options) {
-    const label = o.group || ''
-    if (!map.has(label)) map.set(label, [])
-    map.get(label).push({ label: o.label ?? o, value: o.value ?? o })
+    const key = o.group || ''
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key).push({ label: o.label ?? o, value: o.value ?? o })
   }
-  return Array.from(map.entries()).map(([label, options]) => ({ label, options }))
+  return Array.from(buckets.entries()).map(([label, options]) => ({ label, options }))
 })
 
-// Filter by search query
-const filteredGroups = computed(() => {
-  if (!searchQuery.value) return normalizedGroups.value
-  const q = searchQuery.value.toLowerCase()
+// 搜索态只保留命中子串的项与非空桶
+const shownGroups = computed(() => {
+  if (!query.value) return normalizedGroups.value
+  const q = query.value.toLowerCase()
   return normalizedGroups.value
     .map(g => ({
       label: g.label,
@@ -120,28 +116,19 @@ const filteredGroups = computed(() => {
     .filter(g => g.options.length > 0)
 })
 
-// Flatten for keyboard nav
-const flatOptions = computed(() => filteredGroups.value.flatMap(g => g.options))
+// 键盘导航把二维分组压成一维序列
+const flatList = computed(() => shownGroups.value.flatMap(g => g.options))
 
-function getGlobalIdx(gi, oi) {
+function toFlat(gIdx, oIdx) {
   let idx = 0
-  for (let i = 0; i < gi; i++) idx += normalizedGroups.value[i].options.length
-  return idx + oi
+  for (let i = 0; i < gIdx; i++) idx += normalizedGroups.value[i].options.length
+  return idx + oIdx
 }
 
-function resolveIdx(globalIdx) {
-  for (let gi = 0; gi < filteredGroups.value.length; gi++) {
-    const cnt = filteredGroups.value[gi].options.length
-    if (globalIdx < cnt) return [gi, globalIdx]
-    globalIdx -= cnt
-  }
-  return [0, 0]
-}
-
-const selectedLabel = computed(() => {
+const pickedLabel = computed(() => {
   for (const g of normalizedGroups.value) {
-    const found = g.options.find(o => o.value === props.modelValue)
-    if (found) return found.label
+    const hit = g.options.find(o => o.value === props.modelValue)
+    if (hit) return hit.label
   }
   return ''
 })
@@ -150,18 +137,19 @@ function toggle() {
   isOpen.value ? close() : open()
 }
 
+// 展开即定位、聚焦搜索框，并把高亮预置到当前选中项
 async function open() {
   isOpen.value = true
-  highlightedIdx.value = flatOptions.value.findIndex(o => o.value === props.modelValue)
+  highlight.value = flatList.value.findIndex(o => o.value === props.modelValue)
   await nextTick()
-  searchQuery.value = ''
+  query.value = ''
   searchInputEl.value?.focus()
-  positionDropdown()
+  alignDropdown()
 }
 
 function close() {
   isOpen.value = false
-  searchQuery.value = ''
+  query.value = ''
 }
 
 function pick(opt) {
@@ -169,56 +157,46 @@ function pick(opt) {
   close()
 }
 
-function positionDropdown() {
+// 下方剩余空间 ≥120px 或不小于上方时向下展开，否则向上翻
+function alignDropdown() {
   const rect = rootEl.value?.getBoundingClientRect()
   if (!rect) return
-  const spaceBelow = window.innerHeight - rect.bottom - 16
-  const spaceAbove = rect.top - 16
-  // 下方空间充足或比上方大时向下弹出，否则向上弹出
-  if (spaceBelow >= 120 || spaceBelow >= spaceAbove) {
-    dropdownStyle.value = {
-      position: 'fixed',
-      top: `${rect.bottom + 4}px`,
-      left: `${rect.left}px`,
-      width: `${rect.width}px`,
-      maxHeight: `${Math.min(spaceBelow, 400)}px`,
-    }
-  } else {
-    dropdownStyle.value = {
-      position: 'fixed',
-      bottom: `${window.innerHeight - rect.top + 4}px`,
-      left: `${rect.left}px`,
-      width: `${rect.width}px`,
-      maxHeight: `${Math.min(spaceAbove, 400)}px`,
-    }
+  const below = window.innerHeight - rect.bottom - 16
+  const above = rect.top - 16
+  const drop = below >= 120 || below >= above
+  dropdownBox.value = {
+    position: 'fixed',
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    maxHeight: `${Math.min(drop ? below : above, 400)}px`,
+    ...(drop ? { top: `${rect.bottom + 4}px` } : { bottom: `${window.innerHeight - rect.top + 4}px` }),
   }
 }
 
-function onSearchKeydown(e) {
+function onSearchKey(e) {
   if (e.key === 'ArrowDown') {
     e.preventDefault()
-    highlightedIdx.value = Math.min(highlightedIdx.value + 1, flatOptions.value.length - 1)
+    highlight.value = Math.min(highlight.value + 1, flatList.value.length - 1)
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
-    highlightedIdx.value = Math.max(highlightedIdx.value - 1, 0)
+    highlight.value = Math.max(highlight.value - 1, 0)
   } else if (e.key === 'Enter') {
     e.preventDefault()
-    if (highlightedIdx.value >= 0 && flatOptions.value[highlightedIdx.value]) {
-      pick(flatOptions.value[highlightedIdx.value])
+    if (highlight.value >= 0 && flatList.value[highlight.value]) {
+      pick(flatList.value[highlight.value])
     }
   } else if (e.key === 'Escape') {
     close()
   }
 }
 
+// 展开期挂捕获阶段滚动监听保持贴合（浮层是 fixed，祖先滚动会错位）
 watch(isOpen, val => {
-  if (val) document.addEventListener('scroll', positionDropdown, true)
-  else document.removeEventListener('scroll', positionDropdown, true)
+  const fn = val ? document.addEventListener : document.removeEventListener
+  fn('scroll', alignDropdown, true)
 })
 
-onBeforeUnmount(() => {
-  document.removeEventListener('scroll', positionDropdown, true)
-})
+onBeforeUnmount(() => document.removeEventListener('scroll', alignDropdown, true))
 </script>
 
 <style scoped src="~/assets/styles/base-select.css"></style>

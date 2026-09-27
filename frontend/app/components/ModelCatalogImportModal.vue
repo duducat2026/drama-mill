@@ -1,4 +1,8 @@
 <!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
+<!--
   Drama Mill — 模型目录价：导入到平台刊例价弹窗（dry-run 预览 → 确认导入）
   从 admin/model-catalog.vue 抽离，聚焦导入流程；导入成功后 emit('imported') 由父页刷新概览。
 -->

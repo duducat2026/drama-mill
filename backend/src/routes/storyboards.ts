@@ -16,6 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 分镜（镜头）增删改接口
+ * 角色/道具与分镜是多对多关联表，读写都在这里收口；
+ * 所有绑定（场景/角色/道具）必须先挂在所属集上，防止跨集偷挂资产。
+ */
 import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
@@ -26,108 +31,95 @@ import { logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logg
 
 const app = new Hono()
 
-async function syncStoryboardCharacters(storyboardId: number, characterIds: number[]) {
-  await db.delete(schema.storyboardCharacters)
-    .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
+// 分镜与角色/道具两张关联表结构同构，用列描述符把删旧插新逻辑收成一个助手
+const CHAR_LINK = {
+  table: schema.storyboardCharacters,
+  sbCol: schema.storyboardCharacters.storyboardId,
+  assetCol: schema.storyboardCharacters.characterId,
+  key: 'characterId',
+}
+const PROP_LINK = {
+  table: schema.storyboardProps,
+  sbCol: schema.storyboardProps.storyboardId,
+  assetCol: schema.storyboardProps.propId,
+  key: 'propId',
+}
+type LinkSpec = typeof CHAR_LINK | typeof PROP_LINK
 
-
-  const uniqueIds = [...new Set((characterIds || []).filter(Boolean))]
+async function relinkAssets(spec: LinkSpec, storyboardId: number, assetIds: number[]) {
+  await db.delete(spec.table).where(eq(spec.sbCol, storyboardId))
+  const uniqueIds = [...new Set((assetIds || []).filter(Boolean))]
   if (!uniqueIds.length) return
-
-  for (const characterId of uniqueIds) {
-    await db.insert(schema.storyboardCharacters).values({
+  for (const assetId of uniqueIds) {
+    await db.insert(spec.table).values({
       storyboardId,
-      characterId,
-    })
+      [spec.key]: assetId,
+    } as any)
   }
 }
 
-async function getStoryboardCharacterIds(storyboardId: number) {
-  const links = await db.select().from(schema.storyboardCharacters)
-    .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
-  return links.map(link => link.characterId)
+async function readLinkedIds(spec: LinkSpec, storyboardId: number) {
+  const rows = await db.select().from(spec.table).where(eq(spec.sbCol, storyboardId))
+  return rows.map((row: any) => row[spec.key])
 }
 
-async function syncStoryboardProps(storyboardId: number, propIds: number[]) {
-  await db.delete(schema.storyboardProps)
-    .where(eq(schema.storyboardProps.storyboardId, storyboardId))
+const syncStoryboardCharacters = (id: number, ids: number[]) => relinkAssets(CHAR_LINK, id, ids)
+const syncStoryboardProps = (id: number, ids: number[]) => relinkAssets(PROP_LINK, id, ids)
+const getStoryboardCharacterIds = (id: number) => readLinkedIds(CHAR_LINK, id)
+const getStoryboardPropIds = (id: number) => readLinkedIds(PROP_LINK, id)
 
-  const uniqueIds = [...new Set((propIds || []).filter(Boolean))]
-  if (!uniqueIds.length) return
+/** 场景/角色/道具必须都在该集已关联集合内，越权绑定直接抛错 */
+async function validateStoryboardBindings(
+  episodeId: number,
+  sceneId: number | null | undefined,
+  characterIds: number[] | undefined,
+  propIds?: number[] | undefined,
+) {
+  const [sceneRows, characterRows, propRows] = await Promise.all([
+    db.select().from(schema.episodeScenes).where(eq(schema.episodeScenes.episodeId, episodeId)),
+    db.select().from(schema.episodeCharacters).where(eq(schema.episodeCharacters.episodeId, episodeId)),
+    db.select().from(schema.episodeProps).where(eq(schema.episodeProps.episodeId, episodeId)),
+  ])
+  const boundSceneIds = new Set(sceneRows.map(r => r.sceneId))
+  const boundCharacterIds = new Set(characterRows.map(r => r.characterId))
+  const boundPropIds = new Set(propRows.map(r => r.propId))
 
-  for (const propId of uniqueIds) {
-    await db.insert(schema.storyboardProps).values({
-      storyboardId,
-      propId,
-    })
-  }
-}
-
-async function getStoryboardPropIds(storyboardId: number) {
-  const links = await db.select().from(schema.storyboardProps)
-    .where(eq(schema.storyboardProps.storyboardId, storyboardId))
-  return links.map(link => link.propId)
-}
-
-async function validateStoryboardBindings(episodeId: number, sceneId: number | null | undefined, characterIds: number[] | undefined, propIds?: number[] | undefined) {
-  const sceneLinks = await db.select().from(schema.episodeScenes)
-    .where(eq(schema.episodeScenes.episodeId, episodeId))
-  const episodeSceneIds = new Set(sceneLinks.map(link => link.sceneId))
-  const characterLinks = await db.select().from(schema.episodeCharacters)
-    .where(eq(schema.episodeCharacters.episodeId, episodeId))
-  const episodeCharacterIds = new Set(characterLinks.map(link => link.characterId))
-  const propLinks = await db.select().from(schema.episodeProps)
-    .where(eq(schema.episodeProps.episodeId, episodeId))
-  const episodePropIds = new Set(propLinks.map(link => link.propId))
-
-  if (sceneId != null && !episodeSceneIds.has(sceneId)) {
-    throw new Error('scene_id 必须来自当前集已关联场景')
-  }
-
-  const invalidCharacterIds = (characterIds || []).filter(id => !episodeCharacterIds.has(id))
-  if (invalidCharacterIds.length) {
-    throw new Error('character_ids 必须来自当前集已关联角色')
-  }
-
-  const invalidPropIds = (propIds || []).filter(id => !episodePropIds.has(id))
-  if (invalidPropIds.length) {
+  if ((propIds || []).some(id => !boundPropIds.has(id))) {
     throw new Error('prop_ids 必须来自当前集已关联道具')
   }
+  if ((characterIds || []).some(id => !boundCharacterIds.has(id))) {
+    throw new Error('character_ids 必须来自当前集已关联角色')
+  }
+  if (sceneId != null && !boundSceneIds.has(sceneId)) {
+    throw new Error('scene_id 必须来自当前集已关联场景')
+  }
 }
 
-// POST /storyboards
+// POST /storyboards —— 在指定集下创建镜头，同时落角色/道具关联
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()
   const ts = now()
   await getEpisodeOwned(Number(body.episode_id), user)
-  logTaskStart('StoryboardAPI', 'create', {
-    episodeId: body.episode_id,
-    shotNumber: body.storyboard_number || 1,
-    sceneId: body.scene_id,
-    characterIds: body.character_ids,
-  })
+  logTaskStart('StoryboardAPI', 'create', { episodeId: body.episode_id, sceneId: body.scene_id, shotNumber: body.storyboard_number || 1, characterIds: body.character_ids })
   logTaskPayload('StoryboardAPI', 'create body', body)
   await validateStoryboardBindings(body.episode_id, body.scene_id, body.character_ids, body.prop_ids)
+
   const res = await db.insert(schema.storyboards).values({
+    duration: body.duration || 10,
+    sceneId: body.scene_id,
+    description: body.description,
+    title: body.title,
     episodeId: body.episode_id,
     storyboardNumber: body.storyboard_number || 1,
-    title: body.title,
-    description: body.description,
-    sceneId: body.scene_id,
-    duration: body.duration || 10,
     createdAt: ts,
     updatedAt: ts,
   })
-  await syncStoryboardCharacters(getInsertId(res), body.character_ids || [])
-  await syncStoryboardProps(getInsertId(res), body.prop_ids || [])
-  const [result] = await db.select().from(schema.storyboards)
-    .where(eq(schema.storyboards.id, getInsertId(res)))
-  logTaskSuccess('StoryboardAPI', 'create', {
-    storyboardId: result.id,
-    episodeId: result.episodeId,
-    shotNumber: result.storyboardNumber,
-  })
+  const storyboardId = getInsertId(res)
+  await syncStoryboardCharacters(storyboardId, body.character_ids || [])
+  await syncStoryboardProps(storyboardId, body.prop_ids || [])
+  const [result] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, storyboardId))
+  logTaskSuccess('StoryboardAPI', 'create', { shotNumber: result.storyboardNumber, episodeId: result.episodeId, storyboardId: result.id })
   return created(c, {
     ...toSnakeCase(result),
     character_ids: await getStoryboardCharacterIds(result.id),
@@ -135,17 +127,13 @@ app.post('/', async (c) => {
   })
 })
 
-// PUT /storyboards/:id
+// PUT /storyboards/:id —— body 里出现哪个 snake 字段就更新哪个 camel 列
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
   const storyboard = await getStoryboardOwned(id, user)
-  logTaskStart('StoryboardAPI', 'update', {
-    storyboardId: id,
-    episodeId: storyboard.episodeId,
-    fields: Object.keys(body),
-  })
+  logTaskStart('StoryboardAPI', 'update', { fields: Object.keys(body), episodeId: storyboard.episodeId, storyboardId: id })
   logTaskPayload('StoryboardAPI', 'update body', body)
 
   const fieldMap: Record<string, string> = {
@@ -163,6 +151,7 @@ app.put('/:id', async (c) => {
     if (snakeKey in body) updates[camelKey] = body[snakeKey]
   }
 
+  // 没传的绑定维度沿用库里现值参与校验，避免只改标题也触发误报
   await validateStoryboardBindings(
     storyboard.episodeId,
     'scene_id' in body ? body.scene_id : storyboard.sceneId,
@@ -173,16 +162,11 @@ app.put('/:id', async (c) => {
   await db.update(schema.storyboards).set(updates).where(eq(schema.storyboards.id, id))
   if ('character_ids' in body) await syncStoryboardCharacters(id, body.character_ids || [])
   if ('prop_ids' in body) await syncStoryboardProps(id, body.prop_ids || [])
-  logTaskSuccess('StoryboardAPI', 'update', {
-    storyboardId: id,
-    updatedFields: Object.keys(updates),
-    characterIds: body.character_ids,
-    propIds: body.prop_ids,
-  })
+  logTaskSuccess('StoryboardAPI', 'update', { propIds: body.prop_ids, characterIds: body.character_ids, updatedFields: Object.keys(updates), storyboardId: id })
   return success(c)
 })
 
-// DELETE /storyboards/:id
+// DELETE /storyboards/:id —— 先拆两张关联表再删主行
 app.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))

@@ -1,3 +1,7 @@
+<!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
 <template>
   <!-- 自动化生产进度（非 idle 时显示，5s 轮询；idle 但存在未完成集时作为兜底启动入口） -->
   <div v-if="production && (production.status !== 'idle' || idleProd)" class="card prod-card">

@@ -1,4 +1,8 @@
 <!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
+<!--
   ProjectCreateDialog.vue — 项目启动台（index.vue）新建项目对话框，由超限文件拆分外提。
   自持表单与视觉风格/画面比例选项；创建成功经事件回传父页刷新并跳转项目详情页。
   样式：表单内部样式随组件 scoped 挂载（父页 scoped 不穿透子组件内部元素）。

@@ -1,3 +1,7 @@
+/**
+ * Drama Mill — AI 短剧生成平台
+ * AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+ */
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { query, wrapError } from './model-catalog-query.js'

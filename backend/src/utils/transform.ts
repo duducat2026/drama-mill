@@ -17,18 +17,25 @@
  */
 
 /**
- * 将 Drizzle 返回的 camelCase 对象转换为 snake_case
- * 保持前端 API 兼容（和旧 Go 后端一致）
+ * 出参字段名转换：Drizzle 行对象是 camelCase，接口层统一转回 snake_case
+ * 下发前端（沿用旧 Go 后端的字段命名，前端契约不可破）
  */
+
+// 只在顶层键上做替换，值原样透传
+const CAMEL_EDGE = /[A-Z]/g
+
+function snakeifyKey(key: string): string {
+  return key.replace(CAMEL_EDGE, upper => `_${upper.toLowerCase()}`)
+}
+
 export function toSnakeCase(obj: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {}
-  for (const [key, value] of Object.entries(obj)) {
-    const snakeKey = key.replace(/[A-Z]/g, m => '_' + m.toLowerCase())
-    result[snakeKey] = value
-  }
-  return result
+  const out: Record<string, any> = {}
+  Object.entries(obj).forEach(([key, value]) => {
+    out[snakeifyKey(key)] = value
+  })
+  return out
 }
 
 export function toSnakeCaseArray(arr: Record<string, any>[]): Record<string, any>[] {
-  return arr.map(toSnakeCase)
+  return arr.map(row => toSnakeCase(row))
 }

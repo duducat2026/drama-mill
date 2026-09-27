@@ -16,12 +16,19 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 
+<!-- 工作台全屏布局：不带全局顶栏，页面自行组织内部导航 -->
 <template>
-  <div class="studio-fullscreen">
+  <div class="studio-shell">
     <slot />
   </div>
 </template>
 
 <style scoped>
-.studio-fullscreen { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); }
+.studio-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-base);
+}
 </style>

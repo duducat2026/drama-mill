@@ -1,4 +1,8 @@
 <!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
+<!--
   Drama Mill — Admin 平台视频页：失败任务自动重提上限配置条
   自管加载/保存（运行时即时生效，无需重启），从 videos.vue 抽离以保持页面聚焦于任务列表。
 -->

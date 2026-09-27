@@ -16,6 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 风格预设 CRUD：user_id 为 NULL 的行是系统内置（全局共享、仅 admin 可改），
+ * 其余为用户私有；响应统一附加 is_system 派生位供前端区分权限展示
+ */
 import { Hono } from 'hono'
 import { eq, and, isNull, or } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
@@ -26,30 +30,31 @@ const app = new Hono()
 
 const VALUE_PATTERN = /^[a-z0-9][a-z0-9-]*$/
 
-// 风格预设多租户：user_id NULL = 系统内置（全局共享，仅 admin 可改），否则为用户私有
-// 响应附加 is_system 派生字段，前端据此区分展示与权限
+const isSystemRow = (row: { userId: number | null }) => row.userId === null
+
 function toPresetDto(r: typeof schema.stylePresets.$inferSelect) {
   return { ...toSnakeCase(r), is_system: r.userId === null }
 }
 
-/** 行是否可被当前用户修改/删除：自己的私有行；系统内置行仅 admin */
+/** 修改/删除权限：私有行只认属主；系统内置行只认 admin */
 function canModify(row: typeof schema.stylePresets.$inferSelect, user: { id: number; role: string }) {
-  if (row.userId === null) return user.role === 'admin'
+  if (isSystemRow(row)) return user.role === 'admin'
   return row.userId === user.id
 }
 
-// GET /style-presets — 系统内置 + 当前用户私有；默认只返回启用项，?all=1 返回全部
+// GET /style-presets — 内置 + 自有；默认过滤停用项，?all=1 全量返回
 app.get('/', async (c) => {
   const user = c.get('user')
   const all = c.req.query('all') === '1'
   const rows = await db.select().from(schema.stylePresets)
     .where(or(isNull(schema.stylePresets.userId), eq(schema.stylePresets.userId, user.id)))
-  const filtered = all ? rows : rows.filter(r => r.isActive)
-  filtered.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || a.id - b.id)
-  return success(c, filtered.map(toPresetDto))
+  const visible = all ? rows : rows.filter(r => r.isActive)
+  // 排序稳定：sort_order 小的在前，同值按 id 兜底
+  visible.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || a.id - b.id)
+  return success(c, visible.map(toPresetDto))
 })
 
-// POST /style-presets — 新增风格预设（默认当前用户私有；admin 可传 is_system 创建内置）
+// POST /style-presets — 建档默认私有；admin 传 is_system 才落全局内置
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()
@@ -60,7 +65,7 @@ app.post('/', async (c) => {
 
   const isSystem = !!body.is_system && user.role === 'admin'
   const value = body.value.trim()
-  // 查重范围：系统内置命名空间 + 当前用户自己的风格，保证下拉选项 value 不歧义
+  // 查重视野 = 内置命名空间 + 自己的私有行，保证下拉里同 value 不歧义
   const [dup] = await db.select().from(schema.stylePresets)
     .where(and(
       eq(schema.stylePresets.value, value),
@@ -70,13 +75,13 @@ app.post('/', async (c) => {
 
   const ts = now()
   const res = await db.insert(schema.stylePresets).values({
-    name: body.name.trim(),
-    value,
-    prompt: body.prompt.trim(),
-    description: body.description || null,
-    sortOrder: Number(body.sort_order ?? body.sortOrder ?? 0),
-    isActive: body.is_active === false || body.is_active === 0 ? false : true,
     userId: isSystem ? null : user.id,
+    isActive: body.is_active === false || body.is_active === 0 ? false : true,
+    sortOrder: Number(body.sort_order ?? body.sortOrder ?? 0),
+    description: body.description || null,
+    prompt: body.prompt.trim(),
+    value,
+    name: body.name.trim(),
     createdAt: ts,
     updatedAt: ts,
   })
@@ -85,7 +90,7 @@ app.post('/', async (c) => {
   return created(c, toPresetDto(row))
 })
 
-// PUT /style-presets/:id — 更新（value 创建后不可修改；系统内置行仅 admin，私有行仅属主）
+// PUT /style-presets/:id — value 建档后锁定不可改；越权改按不存在处理
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
@@ -110,7 +115,7 @@ app.put('/:id', async (c) => {
   return success(c)
 })
 
-// DELETE /style-presets/:id — 硬删除（系统内置行仅 admin，私有行仅属主；已用项目保留 key，无害）
+// DELETE /style-presets/:id — 物理删行；内置行只有 admin 能删
 app.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))

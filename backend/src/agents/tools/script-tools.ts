@@ -17,8 +17,8 @@
  */
 
 /**
- * 剧本改写 Agent 工具
- * 模块级单例 — episodeId 通过 RequestContext 按请求注入
+ * 「剧本改写」Agent 的三个工具：读本集原文 / 取原文并附改写要求 / 回写剧本。
+ * 工具对象是模块级单例，本集归属靠 RequestContext 按请求携带。
  */
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
@@ -27,60 +27,61 @@ import { eq } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
 import { getEpisodeId } from '../context.js'
 
+/** 取本集行，取不到时返回错误文案 */
+async function loadEpisode(episodeId: number) {
+  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
+  return ep || null
+}
+
 const readEpisodeScript = createTool({
   id: 'read_episode_script',
-  description: 'Read the script content of the current episode.',
+  description: 'Fetch the raw text stored on the current episode (content column, falling back to script).',
   inputSchema: z.object({}),
   execute: async (_input, context) => {
     const episodeId = getEpisodeId(context?.requestContext)
     if (!episodeId) return { error: 'Missing episodeId in request context' }
-    const [ep] = await db.select().from(schema.episodes)
-      .where(eq(schema.episodes.id, episodeId))
+    const ep = await loadEpisode(episodeId)
     if (!ep) return { error: `Episode not found (id=${episodeId})` }
-    const content = ep.content || ep.scriptContent
-    if (!content) return { error: `Episode has no content (id=${episodeId})` }
-    return { content, word_count: content.length, episode_id: episodeId }
+    const text = ep.content || ep.scriptContent
+    if (!text) return { error: `Episode has no content (id=${episodeId})` }
+    return { content: text, word_count: text.length, episode_id: episodeId }
   },
 })
 
+/** 交给 Agent 的排版规约：场景头/对白行格式是分镜解析的读取契约，不可改动 */
+const SCREENPLAY_SPEC = `把下面的原文改写成格式化剧本，遵守排版规约：
+- 场景头行固定为：## S编号 | 内景/外景 · 地点 | 时间段
+- 动作叙述用自然段，正文严禁出现镜头语言（景别/机位/运镜）
+- 每一句对白写成：角色名：（状态/表情）台词内容
+- 单场戏体量控制在 30-60 秒
+`
+
 const rewriteToScreenplay = createTool({
   id: 'rewrite_to_screenplay',
-  description: 'Read the original content for AI rewriting. Returns the source text with formatting instructions.',
+  description: 'Pull the episode source text together with the screenplay formatting spec for you to rewrite.',
   inputSchema: z.object({
-    instructions: z.string().optional().describe('Additional rewrite instructions'),
+    instructions: z.string().optional().describe('Extra rewriting requirements from the user'),
   }),
   execute: async ({ instructions }, context) => {
     const episodeId = getEpisodeId(context?.requestContext)
     if (!episodeId) return { error: 'Missing episodeId in request context' }
-    const [ep] = await db.select().from(schema.episodes)
-      .where(eq(schema.episodes.id, episodeId))
-    if (!ep) return { error: `Episode not found` }
+    const ep = await loadEpisode(episodeId)
+    if (!ep) return { error: 'Episode not found' }
     const source = ep.content || ep.scriptContent
-    if (!source) return { error: `Episode has no content to rewrite` }
+    if (!source) return { error: 'Episode has no content to rewrite' }
 
     return {
       source_content: source,
-      instruction: `请将以下内容改写为格式化剧本。
-
-格式规范：
-- 场景头：## S编号 | 内景/外景 · 地点 | 时间段
-- 动作描写：自然段落，不包含镜头语言
-- 对白：角色名：（状态/表情）台词内容
-- 每个场景 30-60 秒内容
-
-${instructions || ''}
-
-【原始内容】
-${source}`,
+      instruction: `${SCREENPLAY_SPEC}\n${instructions || ''}\n【原文开始】\n${source}`,
     }
   },
 })
 
 const saveScript = createTool({
   id: 'save_script',
-  description: 'Save the rewritten screenplay content to the current episode.',
+  description: 'Write the finished screenplay back onto the current episode.',
   inputSchema: z.object({
-    content: z.string().describe('The formatted screenplay content to save'),
+    content: z.string().describe('Formatted screenplay text to persist'),
   }),
   execute: async ({ content }, context) => {
     const episodeId = getEpisodeId(context?.requestContext)
@@ -89,7 +90,7 @@ const saveScript = createTool({
       .set({ scriptContent: content, updatedAt: now() })
       .where(eq(schema.episodes.id, episodeId))
 
-    return { message: `Script saved`, word_count: content.length }
+    return { message: 'Script saved', word_count: content.length }
   },
 })
 

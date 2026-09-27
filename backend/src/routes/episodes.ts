@@ -16,27 +16,74 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 分集门面路由（挂载于 /episodes）：新增 / 改字段 / 软删 / 详情 / 关联资产三查询
+ * 流水线类端点（分镜、提取、视频提示词、timings 等）在 episodes-pipeline.ts 合并注册；
+ * 建集核心逻辑复用 services/episode-create.ts（与小说拆分同一入口）
+ */
 import { Hono } from 'hono'
-import { and, eq, isNull, inArray, or, sql, desc } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
-import { success, notFound, badRequest, now } from '../utils/response.js'
-import { toSnakeCaseArray, toSnakeCase } from '../utils/transform.js'
+import { badRequest, notFound, now, success } from '../utils/response.js'
+import { toSnakeCase, toSnakeCaseArray } from '../utils/transform.js'
 import { createEpisode } from '../services/episode-create.js'
-import { getEpisodePipelineSteps } from '../services/pipeline-status.js'
-import { EXTRACT_TARGETS, getExtractionStatus, startExtraction, retryExtraction, type ExtractTarget } from '../services/extraction.js'
-import { getVideoPromptBatchStatus, startVideoPromptBatch, retryVideoPromptBatch } from '../services/video-prompts.js'
-import { localFileSize } from '../utils/storage.js'
-import { getDramaOwned, getEpisodeOwned, getEpisodeFullOwned } from '../services/ownership.js'
-import { getEpisodeTimings } from '../utils/stage-timing.js'
+import { getDramaOwned, getEpisodeFullOwned, getEpisodeOwned } from '../services/ownership.js'
 
 const app = new Hono()
 
-// POST /episodes — Create a new episode
+// PUT /episodes/:id — 白名单字段更新：allowed 里的 snake 键按原名透传，
+// 只有 script_content 需要映射成 camel 列；空更新与非法分辨率写库前拦截
+const SNAKE_TO_CAMEL: Record<string, string> = { script_content: 'scriptContent' }
+const allowed = ['content', 'title', 'description', 'script_content', 'status', 'resolution']
+
+app.put('/:id', async (c) => {
+  const user = c.get('user')
+  const id = Number(c.req.param('id'))
+  await getEpisodeOwned(id, user)
+  const body = await c.req.json()
+
+  const patch: Record<string, any> = {}
+  for (const key of allowed) {
+    if (key in body) patch[SNAKE_TO_CAMEL[key] || key] = body[key]
+  }
+  if (!Object.keys(patch).length) return badRequest(c, 'no valid fields')
+  if ('resolution' in patch && !['480p', '720p'].includes(patch.resolution)) {
+    return badRequest(c, 'resolution 只支持 480p / 720p')
+  }
+
+  await db.update(schema.episodes).set({ ...patch, updatedAt: now() }).where(eq(schema.episodes.id, id))
+  return success(c)
+})
+
+// DELETE /episodes/:id — 软删：打 deleted_at 标记后本集对全部查询不可达，
+// 其分镜与生成任务行原样保留（仅失去入口，不做级联物理删除）
+app.delete('/:id', async (c) => {
+  const user = c.get('user')
+  const id = Number(c.req.param('id'))
+  await getEpisodeOwned(id, user)
+  await db.update(schema.episodes).set({ deletedAt: now(), updatedAt: now() })
+    .where(eq(schema.episodes.id, id))
+  return success(c)
+})
+
+// GET /episodes/:id — 单集真身（带 content/script_content MEDIUMTEXT）
+// 正文体积大，只供剧集工作台按需拉当前集；进度/状态轮询一律走轻投影端点
+app.get('/:id', async (c) => {
+  const user = c.get('user')
+  const id = Number(c.req.param('id'))
+  const { ep } = await getEpisodeFullOwned(id, user)
+  if (!ep) return notFound(c, '剧集不存在')
+  return success(c, toSnakeCase(ep))
+})
+
+// POST /episodes — 新增一集：项目归属校验后交给 createEpisode
+// （配置未显式传入时按用户启用中的配置自动锁定）
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()
   if (!body.drama_id) return badRequest(c, 'drama_id required')
   await getDramaOwned(Number(body.drama_id), user)
+
   try {
     const ep = await createEpisode(Number(body.drama_id), {
       title: body.title,
@@ -50,98 +97,50 @@ app.post('/', async (c) => {
   }
 })
 
-// PUT /episodes/:id - Update episode fields
-app.put('/:id', async (c) => {
-  const user = c.get('user')
-  const id = Number(c.req.param('id'))
-  await getEpisodeOwned(id, user)
-  const body = await c.req.json()
-
-  const allowed = ['content', 'script_content', 'title', 'description', 'status', 'resolution']
-  const updates: Record<string, any> = {}
-  for (const key of allowed) {
-    if (key in body) updates[key] = body[key]
-  }
-  if (Object.keys(updates).length === 0) return badRequest(c, 'no valid fields')
-  if ('resolution' in updates && !['480p', '720p'].includes(updates.resolution)) {
-    return badRequest(c, 'resolution 只支持 480p / 720p')
-  }
-
-  // Map snake_case to camelCase for drizzle
-  const drizzleUpdates: Record<string, any> = { updatedAt: now() }
-  if ('content' in updates) drizzleUpdates.content = updates.content
-  if ('script_content' in updates) drizzleUpdates.scriptContent = updates.script_content
-  if ('title' in updates) drizzleUpdates.title = updates.title
-  if ('description' in updates) drizzleUpdates.description = updates.description
-  if ('status' in updates) drizzleUpdates.status = updates.status
-  if ('resolution' in updates) drizzleUpdates.resolution = updates.resolution
-
-  await db.update(schema.episodes).set(drizzleUpdates).where(eq(schema.episodes.id, id))
-  return success(c)
-})
-
-// DELETE /episodes/:id - Soft delete episode（其分镜/生成记录保留但不可达）
-app.delete('/:id', async (c) => {
-  const user = c.get('user')
-  const id = Number(c.req.param('id'))
-  await getEpisodeOwned(id, user)
-  await db.update(schema.episodes).set({ deletedAt: now(), updatedAt: now() })
-    .where(eq(schema.episodes.id, id))
-  return success(c)
-})
-
-// GET /episodes/:id — 单集详情（含 content/script_content MEDIUMTEXT，仅供剧集页按需加载当前集；
-// 其余状态/进度类端点走 getEpisodeOwned 轻投影，不再把正文带入轮询请求）
-app.get('/:id', async (c) => {
-  const user = c.get('user')
-  const id = Number(c.req.param('id'))
-  const { ep } = await getEpisodeFullOwned(id, user)
-  return success(c, toSnakeCase(ep))
-})
-
-// GET /episodes/:id/characters — characters linked to this episode（WHERE 下推，不再全表拉取后内存过滤）
+// GET /episodes/:id/characters — 本集关联角色
+// 链接表取 id 集合后按 id + 未软删下推 SQL，不再全表拉取回内存过滤
 app.get('/:id/characters', async (c) => {
   const user = c.get('user')
   const episodeId = Number(c.req.param('id'))
   await getEpisodeOwned(episodeId, user)
-  const links = await db.select().from(schema.episodeCharacters)
+
+  const bound = await db.select().from(schema.episodeCharacters)
     .where(eq(schema.episodeCharacters.episodeId, episodeId))
-  const charIds = links.map(l => l.characterId)
-  if (!charIds.length) return success(c, [])
-  const result = await db.select().from(schema.characters)
+  const charIds = bound.map(l => l.characterId)
+  const rows = await db.select().from(schema.characters)
     .where(and(inArray(schema.characters.id, charIds), isNull(schema.characters.deletedAt)))
-  return success(c, toSnakeCaseArray(result))
+  return success(c, toSnakeCaseArray(rows))
 })
 
-// GET /episodes/:id/scenes — scenes linked to this episode（WHERE 下推）
+// GET /episodes/:id/scenes — 本集关联场景（同 characters 的下推口径）
 app.get('/:id/scenes', async (c) => {
   const user = c.get('user')
   const episodeId = Number(c.req.param('id'))
   await getEpisodeOwned(episodeId, user)
-  const links = await db.select().from(schema.episodeScenes)
+
+  const bound = await db.select().from(schema.episodeScenes)
     .where(eq(schema.episodeScenes.episodeId, episodeId))
-  const sceneIds = links.map(l => l.sceneId)
-  if (!sceneIds.length) return success(c, [])
-  const result = await db.select().from(schema.scenes)
+  const sceneIds = bound.map(l => l.sceneId)
+  const rows = await db.select().from(schema.scenes)
     .where(and(inArray(schema.scenes.id, sceneIds), isNull(schema.scenes.deletedAt)))
-  return success(c, toSnakeCaseArray(result))
+  return success(c, toSnakeCaseArray(rows))
 })
 
-// GET /episodes/:id/props — props linked to this episode（WHERE 下推）
+// GET /episodes/:id/props — 本集关联道具（同 characters 的下推口径）
 app.get('/:id/props', async (c) => {
   const user = c.get('user')
   const episodeId = Number(c.req.param('id'))
   await getEpisodeOwned(episodeId, user)
-  const links = await db.select().from(schema.episodeProps)
+
+  const bound = await db.select().from(schema.episodeProps)
     .where(eq(schema.episodeProps.episodeId, episodeId))
-  const propIds = links.map(l => l.propId)
-  if (!propIds.length) return success(c, [])
-  const result = await db.select().from(schema.props)
+  const propIds = bound.map(l => l.propId)
+  const rows = await db.select().from(schema.props)
     .where(and(inArray(schema.props.id, propIds), isNull(schema.props.deletedAt)))
-  return success(c, toSnakeCaseArray(result))
+  return success(c, toSnakeCaseArray(rows))
 })
 
-import episodesPipeline from "./episodes-pipeline.js"
-app.route("/", episodesPipeline)
+import episodesPipeline from './episodes-pipeline.js'
+app.route('/', episodesPipeline)
 
 export default app

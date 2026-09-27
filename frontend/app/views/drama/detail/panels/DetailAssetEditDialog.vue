@@ -1,3 +1,7 @@
+<!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
 <template>
   <!-- 素材详情 / 编辑对话框（与工作台资产卡片同款布局） -->
   <div v-if="editDialog && editTarget" class="overlay mat-detail-overlay" @click.self="closeEdit">

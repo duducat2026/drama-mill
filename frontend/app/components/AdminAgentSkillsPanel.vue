@@ -1,4 +1,8 @@
 <!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
+<!--
   Drama Mill — Admin Agent Skills 面板
   从 pages/admin/agents.vue 抽离：Agent 左侧列表 + Skill 增删改查（skillsAPI）
   作为 Agent 配置页的「Skills」标签内容，自管选中态与 CRUD，父页仅需传入 agentDefs。

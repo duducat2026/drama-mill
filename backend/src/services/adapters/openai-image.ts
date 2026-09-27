@@ -17,9 +17,9 @@
  */
 
 /**
- * OpenAI DALL-E 图片生成 Adapter
- * 端点: /v1/images/generations (注意 /v1 前缀)
- * 响应格式: { data: [{ url: "..." }] } 或 { data: [{ b64_json: "..." }] }
+ * OpenAI 系生图适配（默认 GPT Image，兼容 DALL-E 响应形状）。
+ * 端点固定挂 /v1 前缀；响应两型：{ data:[{url}] } 或 { data:[{b64_json}] }。
+ * 尺寸按模型分档收口：gpt-image-1 只吃三种枚举，gpt-image-2 可任意 16 倍数。
  */
 import type {
   ImageProviderAdapter,
@@ -38,19 +38,18 @@ export class OpenAIImageAdapter implements ImageProviderAdapter {
     const model = record.model || config.model || 'gpt-image-2'
     const isGptImage = model.startsWith('gpt-image-')
     const isGptImage2 = model === 'gpt-image-2'
-    const size = isGptImage2
-      ? this.normalizeGptImage2Size(record.size)
-      : isGptImage
-      ? this.normalizeGptImageSize(record.size)
-      : record.size || '1024x1024'
 
-    const body: any = {
-      model,
-      prompt: record.prompt,
-      size,
-      n: 1,
+    let size: string
+    if (isGptImage2) {
+      size = this.normalizeGptImage2Size(record.size)
+    } else if (isGptImage) {
+      size = this.normalizeGptImageSize(record.size)
+    } else {
+      size = record.size || '1024x1024'
     }
 
+    const body: any = { model, prompt: record.prompt, size, n: 1 }
+    // gpt-image 系没有 response_format 参数（恒可拿 b64）；仅 DALL-E 需要显式要 url
     if (!isGptImage) {
       body.response_format = 'url'
     }
@@ -58,59 +57,45 @@ export class OpenAIImageAdapter implements ImageProviderAdapter {
     return {
       url: joinProviderUrl(config.baseUrl, '/v1', '/images/generations'),
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
       body,
     }
   }
 
+  /** gpt-image-1：贴齐枚举白名单，越界尺寸按宽高关系就近吸附 */
   private normalizeGptImageSize(size?: string | null): string {
-    const allowed = ['1024x1024', '1536x1024', '1024x1536', 'auto']
+    const enumSizes = ['1024x1024', '1536x1024', '1024x1536', 'auto']
     if (!size) return '1024x1024'
+    const lowered = size.toLowerCase()
+    if (enumSizes.includes(lowered)) return lowered
 
-    const normalized = size.toLowerCase()
-    if (allowed.includes(normalized)) return normalized
-
-    const [width, height] = normalized.split('x').map(Number)
-    if (!width || !height) return 'auto'
-    if (width === height) return '1024x1024'
-    return width > height ? '1536x1024' : '1024x1536'
+    const [w, h] = lowered.split('x').map(Number)
+    if (!w || !h) return 'auto'
+    if (w === h) return '1024x1024'
+    return w > h ? '1536x1024' : '1024x1536'
   }
 
+  /** gpt-image-2：宽高各夹进 [256,4096] 并取整到 16 的倍数 */
   private normalizeGptImage2Size(size?: string | null): string {
     if (!size) return '1024x1024'
-    const normalized = size.toLowerCase()
-    if (normalized === 'auto') return 'auto'
+    const lowered = size.toLowerCase()
+    if (lowered === 'auto') return 'auto'
 
-    const [rawWidth, rawHeight] = normalized.split('x').map(Number)
-    if (!rawWidth || !rawHeight) return 'auto'
-
-    const width = this.roundToMultiple(Math.min(4096, Math.max(256, rawWidth)), 16)
-    const height = this.roundToMultiple(Math.min(4096, Math.max(256, rawHeight)), 16)
-    return `${width}x${height}`
-  }
-
-  private roundToMultiple(value: number, multiple: number): number {
-    return Math.max(multiple, Math.round(value / multiple) * multiple)
+    const [w, h] = lowered.split('x').map(Number)
+    if (!w || !h) return 'auto'
+    const clamp16 = (v: number) => snapMultiple(Math.min(4096, Math.max(256, v)), 16)
+    return `${clamp16(w)}x${clamp16(h)}`
   }
 
   parseGenerateResponse(result: any): ImageGenResponse {
-    // OpenAI DALL-E 3 目前是同步返回，但规范上也有异步 task 模式
+    // 现网 DALL-E/GPT Image 都同步直出；task 形态留给 OpenAI 兼容网关
     if (result.task_id || result.id) {
       return { isAsync: true, taskId: result.task_id || result.id }
     }
-    const imageUrl = result.data?.[0]?.url || result.url
-    if (imageUrl) {
-      return { isAsync: false, imageUrl }
-    }
-    // b64_json 模式
-    const b64 = result.data?.[0]?.b64_json
-    if (b64) {
-      // 对于 base64，返回特殊标记，实际处理在 extractImageBase64
-      return { isAsync: false, imageUrl: undefined }
-    }
+    const url = result.data?.[0]?.url || result.url
+    if (url) return { isAsync: false, imageUrl: url }
+    // b64 载荷在这里只判形态，真正的字节收割在 extractImageBase64
+    if (result.data?.[0]?.b64_json) return { isAsync: false, imageUrl: undefined }
     throw new Error('No image URL in response')
   }
 
@@ -118,19 +103,14 @@ export class OpenAIImageAdapter implements ImageProviderAdapter {
     return {
       url: joinProviderUrl(config.baseUrl, '/v1', `/images/task/${taskId}`),
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
+      headers: { 'Authorization': `Bearer ${config.apiKey}` },
       body: undefined,
     }
   }
 
   parsePollResponse(result: any): ImagePollResponse {
     if (result.status === 'completed') {
-      return {
-        status: 'completed',
-        imageUrl: result.image_url || result.data?.[0]?.url || null,
-      }
+      return { status: 'completed', imageUrl: result.image_url || result.data?.[0]?.url || null }
     }
     if (result.status === 'failed') {
       return { status: 'failed', error: result.error?.message || 'Generation failed' }
@@ -144,9 +124,11 @@ export class OpenAIImageAdapter implements ImageProviderAdapter {
 
   extractImageBase64(result: any): { data: string; mimeType: string } | null {
     const b64 = result.data?.[0]?.b64_json
-    if (b64) {
-      return { data: b64, mimeType: 'image/png' }
-    }
-    return null
+    return b64 ? { data: b64, mimeType: 'image/png' } : null
   }
+}
+
+/** 就近取整到 multiple 的倍数，且不低于 multiple 本身 */
+function snapMultiple(value: number, multiple: number): number {
+  return Math.max(multiple, Math.round(value / multiple) * multiple)
 }

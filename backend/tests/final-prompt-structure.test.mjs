@@ -39,19 +39,19 @@ test('prompt agent instructions reference per-asset skills; skill files define t
   const sceneSkill = read('workspace/skills/prompt-generator/scene-prompt/SKILL.md')
 
   // 三类图片规范入口在后端 Agent 指令中（具体创作规则在各自 SKILL.md 中）
-  assert.match(agents, /角色三视图/)
-  assert.match(agents, /场景固定视角/)
-  assert.match(agents, /道具白底单品/)
+  assert.match(agents, /角色走三视图/)
+  assert.match(agents, /场景走固定视角/)
+  assert.match(agents, /道具走白底单品/)
   // 保存工具约定
   assert.match(agents, /save_character_final_prompt/)
   assert.match(agents, /save_scene_final_prompt/)
   // 角色三视图 / 场景固定视角的必备要素由技能文件承载（纯中文输出）
-  assert.match(charSkill, /正脸特写/)
-  assert.match(charSkill, /正面、90 度侧面、背面/)
-  assert.match(charSkill, /三个视图的脸、发型和服装完全一致/)
+  assert.match(charSkill, /脸部特写/)
+  assert.match(charSkill, /正面、90° 侧身、背面/)
+  assert.match(charSkill, /特写与三个全身像的脸、头发、衣着完全一致/)
   assert.match(charSkill, /纯中文/)
-  assert.match(sceneSkill, /固定机位广角镜头/)
-  assert.match(sceneSkill, /前景（\[前景元素\]）、中景（\[中景主体空间\]）、后景（\[后景纵深\]）/)
+  assert.match(sceneSkill, /固定机位广角/)
+  assert.match(sceneSkill, /前景\[框景元素\]、中景\[主体空间\]、后景\[纵深延伸\]/)
   assert.match(sceneSkill, /出入口/)
   assert.match(sceneSkill, /纯中文/)
 })

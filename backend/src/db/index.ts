@@ -16,6 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * MySQL 连接池 + Drizzle 实例 + 启动建库
+ * 模块加载即完成 initDb（建表→迁移→种子），随后 db/schema 才对外可用。
+ */
 import 'dotenv/config'
 import fs from 'fs'
 import mysql from 'mysql2/promise'
@@ -24,56 +28,61 @@ import * as schema from './schema.js'
 import { initMySqlSchema, runMysqlDataSeeds } from './mysql-schema.js'
 import { runMigrationsAndSeed } from './migrations.js'
 
-// 容器内 127.0.0.1 指向容器自身;未显式配置时默认指向宿主机
-// (Linux 需 --add-host=host.docker.internal:host-gateway 才能解析)
-const inContainer = fs.existsSync('/.dockerenv')
-const usingDefaultHost = !process.env.DATABASE_URL && !process.env.MYSQL_HOST
+// docker-compose 部署时容器里的 127.0.0.1 不是宿主机：
+// 没显式配置连接串时默认连 host.docker.internal（Linux 需 --add-host=host.docker.internal:host-gateway）
+const insideContainer = fs.existsSync('/.dockerenv')
+const hostNotConfigured = !process.env.DATABASE_URL && !process.env.MYSQL_HOST
 
-function databaseUrl() {
+function resolveDatabaseUrl(): string {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL
 
-  const host = process.env.MYSQL_HOST || (inContainer ? 'host.docker.internal' : '127.0.0.1')
+  const host = process.env.MYSQL_HOST || (insideContainer ? 'host.docker.internal' : '127.0.0.1')
   const port = process.env.MYSQL_PORT || '3306'
   const user = encodeURIComponent(process.env.MYSQL_USER || 'dramamill')
-  const password = encodeURIComponent(process.env.MYSQL_PASSWORD || 'dramamill_tool')
+  const pass = encodeURIComponent(process.env.MYSQL_PASSWORD || 'dramamill_tool')
   const database = process.env.MYSQL_DATABASE || 'drama_mill'
-  return `mysql://${user}:${password}@${host}:${port}/${database}`
+  return `mysql://${user}:${pass}@${host}:${port}/${database}`
 }
 
 export const pool = mysql.createPool({
-  uri: databaseUrl(),
+  uri: resolveDatabaseUrl(),
   waitForConnections: true,
-  // 默认 30：高并发轮询/批量写入时，10 个连接 + 无界排队会把包括健康检查在内的所有请求拖死（云端小规格机已复现两次）
+  // 连接数默认 30：云端小规格机复现过——高并发轮询/批量写入下 10 连接 + 无限排队
+  // 会把包括健康检查在内的全部请求拖死
   connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT || 30),
-  // 排队上限 200：超限快速报错而非无限挂起，避免事件循环看似“冻结”
+  // 排队上限 200：超了立即报错而不是无声挂起，事件循环不至于看起来"冻结"
   queueLimit: Number(process.env.MYSQL_QUEUE_LIMIT || 200),
   charset: 'utf8mb4',
 })
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+const pause = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-/** 启动建表带重试：Docker 部署时 MySQL 容器就绪晚于应用启动，直接失败会导致进程崩溃 */
+/**
+ * 建表 + 迁移 + 种子，带重试。
+ * Docker 编排里 MySQL 容器就绪通常晚于应用启动，一次失败就崩进程不可接受。
+ * 顺序约束：风格预设种子依赖迁移补上的 user_id 列，必须排在迁移之后。
+ */
 export async function initDb(retries = 10, delayMs = 3000) {
   for (let attempt = 1; ; attempt++) {
     try {
       await initMySqlSchema(pool)
       // 增量迁移与种子（补 user_id 列、种子账号、存量回填、刊例价）
       await runMigrationsAndSeed(pool)
-      // 风格预设种子依赖迁移补的 user_id 列，必须放在迁移之后（存量库先种子会报缺列）
       await runMysqlDataSeeds(pool)
       return
     } catch (err) {
       if (attempt >= retries) throw err
       console.warn(`[db] init failed (attempt ${attempt}/${retries}), retrying in ${delayMs}ms: ${(err as Error).message}`)
-      if (attempt === 1 && usingDefaultHost && inContainer) {
+      if (attempt === 1 && hostNotConfigured && insideContainer) {
         console.warn('[db] 未配置数据库连接:容器内默认尝试宿主机 host.docker.internal:3306。' +
           '如使用独立 MySQL 容器或外部数据库,请设置 DATABASE_URL 或 MYSQL_HOST 环境变量')
       }
-      await sleep(delayMs)
+      await pause(delayMs)
     }
   }
 }
 
+/** INSERT 结果 → 自增主键；拿不到 insertId 直接抛错（调用方依赖它定位刚建的行） */
 export function getInsertId(result: unknown) {
   const packet = Array.isArray(result) ? result[0] : result
   const insertId = (packet as { insertId?: number | string } | undefined)?.insertId

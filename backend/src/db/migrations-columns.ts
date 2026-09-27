@@ -1,3 +1,7 @@
+/**
+ * Drama Mill — AI 短剧生成平台
+ * AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+ */
 /*
  * Drama Mill — 增量迁移：幂等列/索引工具 + 存量表结构升级
  */

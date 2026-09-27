@@ -17,7 +17,9 @@
  */
 
 /**
- * FFmpeg 多镜头拼接 — 将所有生成后的镜头视频拼接为一集
+ * FFmpeg 成片合成 — 将一集内各分镜已生成的视频按镜号顺序拼接为整集成片。
+ * 同批镜头出自同一视频模型时编码参数一致，优先走 -c copy 流拷贝（秒级、零损耗）；
+ * 参数不齐或缺音轨才降级重编码。
  */
 import fs from 'fs'
 import path from 'path'
@@ -30,15 +32,15 @@ import { extractVideoPoster } from '../utils/video-poster.js'
 import { runFfmpeg, runFfprobe, checkFfmpegSuite } from '../utils/ffmpeg.js'
 import { getAbsolutePath, buildAssetDir, tenantNestedPath, getStorageRoot } from '../utils/storage.js'
 
-// 路径解析统一收口到 storage.ts：支持分类目录外置与绝对路径透传（兼容历史数据）
+// 路径解析一律经 storage.ts 收口：兼容分类目录外置与绝对路径透传的历史数据
 function toAbsPath(relativePath: string): string {
   return getAbsolutePath(relativePath)
 }
 
 /**
- * 拼接一集的镜头视频。
- * 优先使用视频生成产物，兼容历史的 composedVideoUrl 数据。
- * 传入 storyboardIds 时只拼接所选镜头（仍按镜号顺序）。
+ * 发起一集成片拼接（异步执行，立即返回 merge 记录 ID）。
+ * 视频来源优先 videoUrl，兼容历史数据的 composedVideoUrl；
+ * storyboardIds 非空时仅拼接勾选的镜头（依旧按镜号排序）。
  */
 export async function mergeEpisodeVideos(episodeId: number, dramaId: number, storyboardIds?: number[], userId?: number): Promise<number> {
   let storyboards = await db.select().from(schema.storyboards)
@@ -46,28 +48,28 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
     .orderBy(schema.storyboards.storyboardNumber)
 
   if (storyboardIds?.length) {
-    const allow = new Set(storyboardIds.map(Number))
-    storyboards = storyboards.filter(sb => allow.has(sb.id))
+    const picked = new Set(storyboardIds.map(Number))
+    storyboards = storyboards.filter(sb => picked.has(sb.id))
   }
 
-  // 允许部分拼接:按镜号顺序拼接已生成的镜头,未生成的跳过
+  // 允许部分拼接：只收有视频的镜头，未生成的直接跳过
   const clips = storyboards
     .map(sb => ({ sb, url: sb.videoUrl || sb.composedVideoUrl }))
     .filter(c => Boolean(c.url)) as { sb: typeof storyboards[number]; url: string }[]
 
-  if (clips.length === 0) throw new Error('所选镜头还没有可拼接的视频')
+  if (!clips.length) throw new Error('所选镜头还没有可拼接的视频')
 
-  // 拼接前探测 ffmpeg：二进制不可用时提前拦截并给出可操作的修复指引（路由层会作为 400 返回前端）
+  // 动手前先探测 ffmpeg 套件：二进制异常要在入口就拦下并给修复指引（路由层按 400 透给前端）
   const suite = await checkFfmpegSuite()
   if (!suite.ffmpeg || !suite.ffprobe) {
     throw new Error('本机 ffmpeg 不可用，无法拼接视频（常见于 node_modules 跨平台拷贝或 ffmpeg-static 下载损坏）。请删除 node_modules 后在本机重新 npm install，或设置 FFMPEG_BIN 指向有效的 ffmpeg 可执行文件后重启服务')
   }
 
-  // 校验视频文件真实存在:DB 里的 video_url 可能指向已被清理的文件,
-  // 直接拼会得到 ffmpeg 的 "No such file or directory" 晦涩报错
-  const missing = clips.filter(c => !fs.existsSync(toAbsPath(c.url)))
-  if (missing.length > 0) {
-    const nums = missing.map(c => `S${c.sb.storyboardNumber}`).join('、')
+  // DB 中的 video_url 可能指向已被清理的文件，预检存在性，
+  // 免得把残缺清单喂给 ffmpeg 换来一句晦涩的 "No such file or directory"
+  const lost = clips.filter(c => !fs.existsSync(toAbsPath(c.url)))
+  if (lost.length > 0) {
+    const nums = lost.map(c => `S${c.sb.storyboardNumber}`).join('、')
     throw new Error(`镜头 ${nums} 的视频文件已丢失（本地文件不存在），请重新生成这些镜头的视频，或在拼接时取消勾选`)
   }
 
@@ -75,8 +77,8 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
 
   logTaskStart('MergeTask', 'episode-merge', { episodeId, dramaId, clips: videos.length })
 
-  // 创建 merge 记录：title 取本集真实标题（曾写 `Episode {episodeId} Merge` 内部占位串，
-  // 该字段随接口下发前端并用于成片下载命名，占位串会直接泄漏进文件名）
+  // 建 merge 记录：title 必须用本集真实标题——该字段会随接口下发前端并参与成片下载命名，
+  // 早期写死的内部占位串曾直接泄漏进用户下载的文件名
   const ts = now()
   const [ep] = await db.select({ title: schema.episodes.title })
     .from(schema.episodes).where(eq(schema.episodes.id, episodeId)).limit(1)
@@ -93,7 +95,7 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
   })
   const mergeId = getInsertId(res)
 
-  // 异步执行（透传租户上下文：成片落 {merged}/{user_id}/{drama_id}/ 分层目录）
+  // 后台执行（租户上下文一路透传：成片按 {merged}/{user_id}/{drama_id}/ 分层落盘）
   doMerge(mergeId, episodeId, dramaId, userId ?? null, videos).catch(async err => {
     logTaskError('MergeTask', 'episode-merge', { mergeId, episodeId, error: err.message })
     console.error(`[Merge] Failed:`, err)
@@ -105,7 +107,7 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
   return mergeId
 }
 
-/** 探测单个片段的音视频关键参数，判断能否走免重编码的流拷贝拼接（直跑 ffprobe，绕开 fluent-ffmpeg 崩溃路径） */
+/** ffprobe 单片段取音视频关键参数（直跑 ffprobe，绕开 fluent-ffmpeg 的崩溃路径），任一路缺失或探测失败记 null */
 function probeClip(absPath: string): Promise<{ v: string | null; a: string | null }> {
   return runFfprobe([
     '-v', 'error', '-print_format', 'json',
@@ -114,7 +116,7 @@ function probeClip(absPath: string): Promise<{ v: string | null; a: string | nul
     const meta = JSON.parse(out) as { streams?: any[] }
     const vs = (meta.streams || []).find((s: any) => s.codec_type === 'video')
     const as = (meta.streams || []).find((s: any) => s.codec_type === 'audio')
-    // 采样宽高/帧率/编码等关键维度；音频额外要求采样率与声道一致，否则无缝拼接会错位/静音丢失
+    // 视频比编码/宽高/帧率/profile；音频还要求采样率与声道一致——不齐时流拷贝会错位或丢音
     return {
       v: vs ? `${vs.codec_name}|${vs.width}x${vs.height}|${vs.r_frame_rate}|${vs.profile ?? ''}` : null,
       a: as ? `${as.codec_name}|${as.sample_rate}|${as.channels}` : null,
@@ -122,39 +124,36 @@ function probeClip(absPath: string): Promise<{ v: string | null; a: string | nul
   }).catch(() => ({ v: null, a: null }))
 }
 
-/** 全部片段编码参数一致（h264+aac 且有音轨）时返回 true，可用 -c copy 流拷贝（秒级完成，无画质损失） */
+/** 所有片段编码参数完全一致且都带音轨（h264+aac）才允许 -c copy 流拷贝；缺音轨片段自动降级重编码 */
 async function canStreamCopy(absPaths: string[]): Promise<boolean> {
   const probes = await Promise.all(absPaths.map(probeClip))
   if (probes.some(p => !p.v || !p.a)) return false
-  const sig = `${probes[0].v}#${probes[0].a}`
-  return probes.every(p => `${p.v}#${p.a}` === sig) && probes[0].v!.startsWith('h264') && probes[0].a!.startsWith('aac')
+  const signature = `${probes[0].v}#${probes[0].a}`
+  return probes.every(p => `${p.v}#${p.a}` === signature)
+    && probes[0].v!.startsWith('h264') && probes[0].a!.startsWith('aac')
 }
 
-/** 需要重编码时的视频编码器：macOS 优先 VideoToolbox 硬编（快 5~10 倍），其余平台 libx264 并降为 veryfast */
+// 重编码视频编码器选型只看平台、结果可缓存：macOS 走 VideoToolbox 硬编（快 5~10 倍），其余平台 libx264 + veryfast
 let encoderCache: string[] | null = null
 function pickVideoEncoder(): string[] {
-  if (encoderCache) return encoderCache
-  let encoders: string[]
-  if (process.platform === 'darwin') {
-    encoders = ['-c:v', 'h264_videotoolbox', '-b:v', '8M']
-  } else {
-    encoders = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
+  if (!encoderCache) {
+    encoderCache = process.platform === 'darwin'
+      ? ['-c:v', 'h264_videotoolbox', '-b:v', '8M']
+      : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
   }
-  encoderCache = encoders
-  return encoders
+  return encoderCache
 }
 
 async function doMerge(mergeId: number, episodeId: number, dramaId: number, userId: number | null, videos: string[]) {
-  // 生成 concat 列表文件（临时文件放在存储根下，不属于素材分类）
+  // concat 清单是临时文件，放存储根 temp 下（不归属任何素材分类目录）
   const listDir = path.join(getStorageRoot(), 'temp')
   fs.mkdirSync(listDir, { recursive: true })
   const listPath = path.join(listDir, `${uuid()}.txt`)
-
   const listContent = videos
     .map(v => `file '${toAbsPath(v)}'`)
     .join('\n')
 
-  // 输出文件（成片分类目录，按租户/剧集分层）
+  // 成片输出目录：按租户/剧集分层的 merged 分类
   const outputDir = buildAssetDir('merged', userId, dramaId)
   fs.mkdirSync(outputDir, { recursive: true })
   const outputFilename = `${uuid()}.mp4`
@@ -162,7 +161,7 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, user
 
   try {
     fs.writeFileSync(listPath, listContent, 'utf-8')
-    // 拼接策略：镜头来自同一视频模型时编码参数完全一致，直接流拷贝免重编码；不一致才降级重编码
+    // 拼接策略二选一：编码全齐走流拷贝，否则带重编码参数（探测失败按重编码兜底）
     const streamCopy = await canStreamCopy(videos.map(toAbsPath)).catch(() => false)
     const outputOptions = streamCopy
       ? ['-fflags', '+genpts', '-c', 'copy', '-movflags', '+faststart']
@@ -176,11 +175,11 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, user
         ]
     logTaskWarn('MergeTask', 'strategy', { mergeId, mode: streamCopy ? 'stream-copy' : 'reencode' })
 
-    // 拼接用 runFfmpeg 直接 spawn（绕开 fluent-ffmpeg 在 Node ≥22 的进程级崩溃路径），失败抛错由外层 catch 落库
+    // 执行拼接走 runFfmpeg 直接 spawn（fluent-ffmpeg 在 Node ≥22 有进程级崩溃路径）；抛错由外层统一落库
     await runFfmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, ...outputOptions, outputPath], 30 * 60_000)
   } finally {
-    // 清理临时文件
-    // 只回收本任务清单；异常写入、拼接失败和超时同样回收，不覆盖原始业务错误。
+    // 无论写入是否完整、拼接是否失败或超时，本任务的清单文件都必须回收；
+    // 只删 ENOENT 之外的错误才记警告，不让清理异常覆盖业务错误
     try {
       fs.unlinkSync(listPath)
     } catch (err) {
@@ -191,20 +190,20 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, user
     }
   }
 
-  // 获取时长
+  // 探测成片时长（失败记 0，不阻断回填）
   const duration = await getVideoDuration(outputPath)
 
   const mergedRelative = `static/merged/${tenantNestedPath(userId, dramaId)}/${outputFilename}`
 
-  // 成片海报帧（导出页封面用）
+  // 顺手抽一帧海报图，供导出页做封面
   await extractVideoPoster(mergedRelative)
 
-  // 更新 merge 记录
+  // merge 记录回填成片路径与完成态
   await db.update(schema.videoMerges)
     .set({ status: 'completed', mergedUrl: mergedRelative, duration, completedAt: now() })
     .where(eq(schema.videoMerges.id, mergeId))
 
-  // 更新 episode
+  // 集的 videoUrl 同步指向新成片
   await db.update(schema.episodes)
     .set({ videoUrl: mergedRelative, updatedAt: now() })
     .where(eq(schema.episodes.id, episodeId))

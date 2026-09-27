@@ -40,6 +40,8 @@ rsync -az -e "ssh -o ConnectTimeout=15" \
   --exclude '.env' --exclude '.env.local' --exclude '*.log' \
   --exclude 'data/static/' --exclude 'data/storage/' --exclude 'data/*.db*' \
   --exclude '/drama/' --exclude 'logs/' --exclude '.git/' \
+  --exclude 'backups/' --exclude '.cleanroom-tmp/' \
+  --exclude '.dbpass.tmp' --exclude '.rescue-historical.sh' \
   --exclude '.DS_Store' --exclude 'docker/' \
   --exclude 'Dockerfile' --exclude 'docker-compose.yml' --exclude '.dockerignore' \
   --exclude '/donate.png' --exclude '/drama.png' \

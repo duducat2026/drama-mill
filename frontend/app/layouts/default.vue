@@ -16,9 +16,12 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 
+<!--
+  用户侧全局布局：毛玻璃顶栏（品牌/主导航/账号区）+ 条件横幅 + 内容槽
+  跨页面复用，页面级数据不进布局；AI 配置缺失与总开关关闭各占一条横幅
+-->
 <template>
   <div class="shell">
-    <!-- Header -->
     <header class="header">
       <div class="header-left">
         <button class="brand" @click="navigateTo('/')">
@@ -33,6 +36,7 @@
         </button>
       </div>
 
+      <!-- 主导航做成分段控件样式：药丸轨道 + 白底凸起当前项 -->
       <nav class="header-nav">
         <NuxtLink to="/" class="nav-link" :class="{ active: route.path === '/' }">
           <LayoutGrid :size="15" :stroke-width="1.8" />
@@ -52,20 +56,20 @@
         </NuxtLink>
       </nav>
 
-      <!-- 账号区固定在顶栏最右：修改密码 / 退出登录在任意用户页可达 -->
+      <!-- 账号区固定在顶栏最右：改密/登出在任意用户页一步可达 -->
       <div class="header-right">
         <UserMenu />
       </div>
     </header>
 
-    <!-- AI 服务未配置引导横幅(缺任一类型即提示；总开关关闭时让位给下方开关横幅，避免两条同色横幅堆叠) -->
+    <!-- 缺任一服务类型的活跃配置就挂引导横幅；总开关关闭时让位给开关横幅，避免同色双横幅叠排 -->
     <div v-if="missingConfigLabels.length && aiCallEnabled" class="config-banner">
       <TriangleAlert :size="14" :stroke-width="1.8" />
       <span>尚未配置{{ missingConfigLabels.join('、') }}模型,AI 功能无法使用</span>
       <NuxtLink to="/settings" class="config-banner-link">前往设置</NuxtLink>
     </div>
 
-    <!-- 模型调用总开关已关闭：全站提示，避免用户在未知状态下反复点击生成 -->
+    <!-- 模型调用总开关关闭：全站显式提示，防止用户在不知情状态下反复触发生成 -->
     <div v-if="!aiCallEnabled" class="config-banner is-ai-off">
       <PowerOff :size="14" :stroke-width="1.8" />
       <span>{{ AI_CALL_OFF_TIP }}</span>
@@ -79,20 +83,21 @@
 </template>
 
 <script setup>
-import { LayoutGrid, Settings, TriangleAlert, ListOrdered, BookOpen, PowerOff } from 'lucide-vue-next'
+import { BookOpen, LayoutGrid, ListOrdered, PowerOff, Settings, TriangleAlert } from 'lucide-vue-next'
 import { aiConfigAPI } from '~/composables/useApi'
-import { useAiSwitch, AI_CALL_OFF_TIP } from '~/composables/useAiSwitch'
+import { AI_CALL_OFF_TIP, useAiSwitch } from '~/composables/useAiSwitch'
 import brandLogo from '~/assets/drama-mill-logo-128.png'
 
 const route = useRoute()
 const showBrandImage = ref(true)
 
-// 模型调用总开关：与设置页/工作台共用同一份状态
+// 模型调用总开关：与设置页/工作台共享单例状态
 const { aiCallEnabled, aiCallSubmitting, refreshAiCall, toggleAiCall } = useAiSwitch()
 async function onAiCallToggle(next) {
   try { await toggleAiCall(next) } catch { /* toast 由具体页面处理，布局只负责展示 */ }
 }
 
+// 三类服务都要有启用配置；缺哪类报哪类中文名
 const SERVICE_TYPE_LABELS = { text: '文本', image: '图片', video: '视频' }
 const missingConfigLabels = ref([])
 
@@ -106,36 +111,46 @@ async function checkAiConfigs() {
 }
 
 onMounted(() => { checkAiConfigs(); refreshAiCall() })
-// 设置页保存配置后返回时重新检查(布局跨页面复用,onMounted 只触发一次)
+// 布局跨页面复用、onMounted 只跑一次：路由切换时补一次检查，覆盖设置页保存后返回的场景
 watch(() => route.path, () => { checkAiConfigs(); refreshAiCall() })
 </script>
 
 <style scoped>
 .shell {
-  display: flex; flex-direction: column;
-  height: 100vh; overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
   background: var(--bg-base);
 }
 
-/* === Header === */
+/* —— 顶栏：半透明毛玻璃条 —— */
 .header {
-  display: flex; align-items: center;
-  height: 60px; flex-shrink: 0;
-  padding: 0 24px;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
   gap: 32px;
+  height: 60px;
+  flex-shrink: 0;
+  padding: 0 24px;
   background: rgba(251,251,253,0.72);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-bottom: 1px solid var(--border);
-  position: relative; z-index: 10;
 }
-
 .header-left { display: flex; align-items: center; }
 
 .brand {
-  display: flex; align-items: center; gap: 11px;
-  background: transparent; border: none; cursor: pointer; padding: 4px 8px 4px 4px;
-  text-decoration: none; border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 8px 4px 4px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+  text-decoration: none;
   transition: background 0.18s var(--ease-out);
 }
 .brand:hover { background: var(--bg-hover); }
@@ -144,51 +159,69 @@ watch(() => route.path, () => { checkAiConfigs(); refreshAiCall() })
   box-shadow: 0 0 0 3.5px var(--button-focus);
 }
 .brand-mark {
-  width: 32px; height: 32px;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--text-0); border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   overflow: hidden;
+  background: var(--text-0);
+  border-radius: 9px;
 }
 .brand-logo {
+  display: block;
   width: 22px;
   height: 22px;
   object-fit: contain;
-  display: block;
 }
 .brand-fallback {
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
   line-height: 1;
+  color: #fff;
 }
-.brand-text { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
 .brand-name {
-  font-size: 15px; font-weight: 700;
-  color: var(--text-0);
+  font-size: 15px;
+  font-weight: 700;
   letter-spacing: -0.01em;
+  color: var(--text-0);
 }
 .brand-sub {
-  font-size: 10px; font-weight: 400;
-  color: var(--text-3); margin-top: 1px;
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 400;
   letter-spacing: 0.04em;
+  color: var(--text-3);
 }
 
-/* Nav — pill segmented group */
+/* —— 主导航：分段控件轨道 —— */
 .header-nav {
-  display: flex; gap: 2px;
+  display: flex;
+  gap: 2px;
   padding: 3px;
   border-radius: var(--radius-pill);
   background: rgba(0,0,0,0.05);
 }
 .nav-link {
-  display: flex; align-items: center; gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-height: 32px;
-  padding: 0 16px; border-radius: var(--radius-pill);
-  font-size: 13px; font-weight: 600;
-  color: var(--text-2); text-decoration: none;
-  transition: all 0.18s var(--ease-out);
+  padding: 0 16px;
   border: none;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1;
+  color: var(--text-2);
+  text-decoration: none;
+  transition: all 0.18s var(--ease-out);
 }
 .nav-link:hover { color: var(--text-0); }
 .nav-link.active {
@@ -201,35 +234,50 @@ watch(() => route.path, () => { checkAiConfigs(); refreshAiCall() })
   box-shadow: 0 0 0 3.5px var(--button-focus);
 }
 
-/* 账号区：始终贴顶栏最右 */
+/* —— 账号区：永远贴最右 —— */
 .header-right {
   margin-left: auto;
-  display: flex; align-items: center; gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-/* Config banner — AI 服务未配置引导 */
+/* —— 警示横幅（缺配置 / 开关关闭共用版式）—— */
 .config-banner {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 24px; flex-shrink: 0;
-  font-size: 12.5px; color: #92400e;
+  position: relative;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 24px;
+  font-size: 12.5px;
+  color: #92400e;
   background: #fffbeb;
   border-bottom: 1px solid #fde68a;
-  position: relative; z-index: 9;
 }
 .config-banner-link {
   margin-left: auto;
-  font-size: 12.5px; font-weight: 600;
-  color: #b45309; text-decoration: none;
-  padding: 2px 10px; border-radius: var(--radius-pill);
+  padding: 2px 10px;
   border: 1px solid #fcd34d;
-  transition: all 0.18s var(--ease-out);
+  border-radius: var(--radius-pill);
+  font-size: 12.5px;
+  font-weight: 600;
   line-height: 1.6;
+  color: #b45309;
+  text-decoration: none;
+  transition: all 0.18s var(--ease-out);
 }
 .config-banner-link:hover { background: #fef3c7; color: #92400e; }
-/* 模型调用已关闭横幅复用同款版式，按钮态补齐 cursor/字体继承 */
+/* 开关横幅的「立即打开」是 button：补齐光标与字体继承，提交中降透明度 */
 .is-ai-off .config-banner-link { cursor: pointer; font: inherit; line-height: 1.6; }
 .is-ai-off .config-banner-link:disabled { opacity: 0.6; cursor: default; }
 
-/* Content */
-.content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+/* —— 内容槽 —— */
+.content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
 </style>

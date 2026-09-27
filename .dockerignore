@@ -1,21 +1,37 @@
+# 不进入 Docker 构建上下文的内容（与 .gitignore 相互独立，宁可多排除）
+
+# 依赖与产物在镜像内重建
 node_modules
 dist
+frontend/.nuxt
+frontend/.output
+*.log
+logs
+
+# VCS 与本地工具目录
 .git
 .idea
 .vscode
 .qoder
 .DS_Store
-*.log
-logs
+.superpowers
+.claude
 
-# 本机环境、凭据、素材和历史备份不进入镜像构建上下文
+# 凭据与本机环境（示例文件除外）
 **/.env
 **/.env.*
 !**/.env.example
 .dbpass.tmp
 .rescue-historical.sh
+
+# 素材、备份与大文件
 backups
 drama
+data/static
+data/storage
+data/drama_generator.db*
+data/drama_mill.db*
+data/*.bak*
 **/*.bundle
 **/*.sql.gz
 **/*.dump
@@ -27,22 +43,14 @@ drama
 **/*.key
 **/*.p12
 **/*.pfx
-data/drama_generator.db*
-data/drama_mill.db*
-data/static
-data/storage
-# 分类存储目录（ASSET/VIDEO/MERGED/UPLOAD_PATH 默认在 data/static 下，
-# 外置后可能在项目根其它位置，同样不进构建上下文）
+
+# 外置分类存储目录（ASSET/VIDEO/MERGED/UPLOAD_PATH 默认在 data/static 下，
+# 外置后可能出现在项目根，同样排除）
 assets-store
 video-store
 merged-store
 upload-store
-data/*.bak*
-frontend/.nuxt
-frontend/.output
-frontend/node_modules
-backend/node_modules
+
+# 其它临时目录
 tmp
 temp
-.superpowers
-.claude

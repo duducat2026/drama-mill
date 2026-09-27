@@ -17,14 +17,12 @@
  */
 
 /**
- * Agent prompt 文件加载 — workspace/prompts/<agent_type>.md
- * 文件格式（参照 SKILL.md 惯例）：
- *   ---
- *   name: 分镜拆解
- *   model: ""        # 可选，覆盖文本模型；空 = 用 AI 服务默认
- *   ---
- *   <系统提示词正文>
- * 文件即唯一事实来源；文件缺失时由调用方回退到代码默认值。
+ * Agent 提示词文件的读写层。
+ *
+ * 每个 Agent 的提示词存放于 workspace/prompts/<agent_type>.md，文件结构沿用
+ * SKILL.md 的 frontmatter 习惯：三条 `---` 包围的头部只认 name 与 model
+ * 两个标量键（model 留空表示走 AI 服务默认模型），头下正文即系统提示词。
+ * 磁盘文件是提示词的唯一权威版本；读不到时调用方退回代码内置默认。
  */
 import { skillsManagerWorkspace } from './skills.js'
 
@@ -34,41 +32,55 @@ export interface AgentPromptFile {
   instructions: string
 }
 
-const fsm = () => skillsManagerWorkspace.filesystem!
+const workspaceFs = () => skillsManagerWorkspace.filesystem!
+
+/** prompt 文件相对 workspace 的路径 */
 export const promptFilePath = (agentType: string) => `prompts/${agentType}.md`
 
-/** 解析 prompt 文件（frontmatter 仅支持 name/model 两个标量字段，无需 yaml 依赖） */
+/**
+ * 逐行拆解 frontmatter 块，只提取 name / model；没有头部时原样视为全文正文。
+ * 不引 yaml 解析器——头部只有两个标量键，手写拆分足够。
+ */
 export function parsePromptFile(raw: string): AgentPromptFile {
-  const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
-  let name = ''
-  let model = ''
-  let body = raw
-  if (fmMatch) {
-    const fm = fmMatch[1]
-    const get = (key: string) => {
-      const m = fm.match(new RegExp(`^${key}:\\s*"?([^"\\n]*)"?\\s*$`, 'm'))
-      return (m?.[1] || '').trim()
+  const lines = raw.split(/\r?\n/)
+  const result: AgentPromptFile = { name: '', model: '', instructions: '' }
+
+  let cursor = 0
+  if (lines[0]?.trim() === '---') {
+    const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+    if (end > 0) {
+      for (const line of lines.slice(1, end)) {
+        const sep = line.indexOf(':')
+        if (sep < 0) continue
+        const key = line.slice(0, sep).trim()
+        const value = line.slice(sep + 1).trim().replace(/^"(.*)"$/, '$1').trim()
+        if (key === 'name') result.name = value
+        else if (key === 'model') result.model = value
+      }
+      cursor = end + 1
     }
-    name = get('name')
-    model = get('model')
-    body = raw.slice(fmMatch[0].length)
   }
-  return { name, model, instructions: body.trim() }
+  result.instructions = lines.slice(cursor).join('\n').trim()
+  return result
 }
 
-/** 序列化为 prompt 文件内容（供保存接口使用） */
+/** 反向操作：把结构体拼回可写盘的 prompt 文件文本（保存接口用） */
 export function serializePromptFile(file: AgentPromptFile): string {
-  return `---\nname: ${file.name}\nmodel: "${file.model}"\n---\n\n${file.instructions.trim()}\n`
+  const header = ['---', `name: ${file.name}`, `model: "${file.model}"`, '---']
+  return `${header.join('\n')}\n\n${file.instructions.trim()}\n`
 }
 
-/** 读取 Agent 的 prompt 文件；文件不存在或解析失败返回 null */
+/**
+ * 加载指定 Agent 的磁盘提示词。
+ * 文件缺失、读取抛错、或正文为空一律返回 null，由调用方决定回退策略。
+ */
 export async function loadAgentPromptFile(agentType: string): Promise<AgentPromptFile | null> {
+  const relPath = promptFilePath(agentType)
   try {
-    const path = promptFilePath(agentType)
-    if (!await fsm().exists(path)) return null
-    const raw = String(await fsm().readFile(path, { encoding: 'utf-8' }))
+    if (!await workspaceFs().exists(relPath)) return null
+    const raw = String(await workspaceFs().readFile(relPath, { encoding: 'utf-8' }))
     const parsed = parsePromptFile(raw)
-    return parsed.instructions ? parsed : null
+    return parsed.instructions.length > 0 ? parsed : null
   } catch {
     return null
   }

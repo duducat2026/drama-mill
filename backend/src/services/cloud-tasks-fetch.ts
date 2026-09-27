@@ -1,3 +1,7 @@
+/**
+ * Drama Mill — AI 短剧生成平台
+ * AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+ */
 /*
  * Drama Mill — 云端异步任务查询：DashScope 批量任务列表拉取与计数
  *

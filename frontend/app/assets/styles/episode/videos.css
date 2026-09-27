@@ -39,7 +39,8 @@
 }
 .video-task-workbench { 
   flex: 1;
-  min-height: 0;
+  /* 低视口下保底高度：宁可让 .prod-content 滚动，也不被 flex 压成 0 高（overflow:hidden 会吞掉内容） */
+  min-height: 360px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(460px, 55%);
   overflow: hidden;

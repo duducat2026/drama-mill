@@ -16,6 +16,10 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 
+<!--
+  危险操作确认框：遮罩 + 居中卡片（复用 studio.css 的 overlay/dialog 骨架）
+  Esc 取消、Enter 确认；loading 期间双钮锁死并显示进度文案
+-->
 <template>
   <Teleport to="body">
     <div v-if="open" class="overlay" @click.self="emit('cancel')">
@@ -39,10 +43,12 @@
 </template>
 
 <script setup>
-import { Trash2, TriangleAlert, Loader2 } from 'lucide-vue-next'
+import { onUnmounted, watch } from 'vue'
+import { Loader2, Trash2, TriangleAlert } from 'lucide-vue-next'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  // 文案三件套：标题 / 说明 / 确认钮（默认按删除语义给词）
   title: { type: String, default: '确认删除' },
   message: { type: String, default: '' },
   confirmText: { type: String, default: '删除' },
@@ -59,62 +65,31 @@ function onKeydown(e) {
   if (e.key === 'Enter') emit('confirm')
 }
 
-watch(() => props.open, (v) => {
-  if (v) window.addEventListener('keydown', onKeydown)
-  else window.removeEventListener('keydown', onKeydown)
+// 打开期间才挂全局键盘监听，关闭与卸载对称摘除
+watch(() => props.open, active => {
+  const fn = active ? window.addEventListener : window.removeEventListener
+  fn('keydown', onKeydown)
 })
 
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <style scoped>
-.confirm-dialog {
-  width: 400px;
-  max-width: calc(100vw - 48px);
-  padding: 28px 24px 20px;
-  align-items: center;
-  text-align: center;
-}
+.confirm-dialog { width: 400px; max-width: calc(100vw - 48px); padding: 28px 24px 20px; align-items: center; text-align: center; }
 .confirm-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: var(--action-danger-bg);
-  color: var(--action-danger);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: center;
+  width: 52px; height: 52px; margin-bottom: 14px; border-radius: 50%;
+  color: var(--action-danger); background: var(--action-danger-bg);
 }
-.confirm-icon.is-warn {
-  background: var(--warning-bg);
-  color: var(--warning);
-}
-.confirm-title {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--text-0);
-}
+.confirm-icon.is-warn { color: var(--warning); background: var(--warning-bg); }
+.confirm-title { font: 700 16px var(--font-body); letter-spacing: -0.01em; color: var(--text-0); }
 .confirm-message {
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--text-2);
-  max-width: 320px;
-  word-break: break-word;
+  margin-top: 8px; max-width: 320px; font-size: 13px; line-height: 1.65;
+  color: var(--text-2); word-break: break-word;
 }
-.confirm-actions {
-  display: flex;
-  gap: 10px;
-  width: 100%;
-  margin-top: 22px;
-}
+.confirm-actions { display: flex; gap: 10px; width: 100%; margin-top: 22px; }
 .confirm-actions .btn { flex: 1; }
-.confirm-danger-btn {
-  background: var(--action-danger);
-  color: #fff;
-}
+.confirm-danger-btn { background: var(--action-danger); color: #fff; }
 .confirm-danger-btn:hover { background: #d70015; color: #fff; }
 .confirm-danger-btn:disabled { opacity: 0.6; }
 </style>

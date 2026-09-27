@@ -16,6 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * Hono 服务入口
+ * 组装顺序：CORS → 请求日志 → onError；/api/v1 子应用再叠 auth + audit。
+ * 静态素材走自定义分类解析；前端产物按 SPA fallback 兜底；启动时拉起任务恢复与看门狗。
+ */
 import 'dotenv/config'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -61,26 +66,26 @@ const projectRoot = path.resolve(__dirname, '../..')
 
 const app = new Hono()
 
-// Middleware
+// 开发期 Nuxt dev server 与生产同域两个来源都放行，带 cookie
 app.use('*', cors({
   origin: ['http://localhost:3013', 'http://localhost:5679'],
   credentials: true,
 }))
 app.use('*', requestLogger)
-// 错误处理必须注册为 onError 钩子：api 子应用内的异常不会传播到父应用中间件，
-// 且 app / api 需各自接管（子应用异常由子应用自己的 onError 处理）
+// 错误兜底必须走 onError 钩子而不是中间件：api 子应用内抛出的异常
+// 不会向上传播到父应用中间件，父子两层各自挂 onError 才能都接住
 app.onError(errorHandler)
 
-// Health check
+// 健康检查（探活/部署脚本用，无需鉴权）
 app.get('/api/v1/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
 
-// API routes
+// 业务 API 子应用：先鉴权再审计
 const api = new Hono()
 api.onError(errorHandler)
 api.use('*', authMiddleware)
 api.use('*', auditMiddleware)
 api.route('/auth', auth)
-// 素材子路由先注册：/:id/assets-status 等具体路径需先于门面 /:id 通配路由匹配
+// 素材子路由必须先注册：/dramas/:id/assets-status 这类具体路径要抢在门面 /dramas/:id 通配前匹配
 api.route('/dramas', dramasAssets)
 api.route('/dramas', dramas)
 api.route('/episodes', episodes)
@@ -106,10 +111,9 @@ api.route('/admin', admin)
 
 app.route('/api/v1', api)
 
-// Serve static files (storage)
-// 自定义解析中间件：按分类前缀（images/videos/merged/uploads）映射到各自配置目录，
-// 目录可在项目目录之外；相对路径格式 static/xxx/... 不变，前端零改动。
-// 生成的图片/视频按 uuid 命名、内容不变，标记为 immutable 让浏览器长缓存；保持免登录避免破坏 img/video 标签加载
+// 静态素材分发：images/videos/merged/uploads 四个分类各自可外置目录，
+// 由 resolveStaticFile 按前缀映射；对外的相对路径 static/xxx/... 保持不变，前端零改动。
+// 文件名带 uuid、内容不可变 → 打 immutable 长缓存；不挂鉴权，否则 <img>/<video> 标签加载失败
 app.get('/static/*', async (c) => {
   const resolved = resolveStaticFile(c.req.path)
   if (!resolved) return c.notFound()
@@ -118,10 +122,10 @@ app.get('/static/*', async (c) => {
   return c.body(fs.createReadStream(resolved.abs) as any)
 })
 
-// Serve frontend (production build)
-// 根路径用预渲染首页 index.html（含 SSR 数据 path="/");
-// 其余未匹配路径用 200.html（SPA fallback，serverRendered=false，无 path 字段），
-// 避免客户端水合时因 SSR path 不匹配而跳回首页
+// 前端生产构建产物（Nuxt static）：
+// "/" 精确回 index.html（预渲染页，SSR 数据里带 path="/")；
+// 其余路径回 200.html 做 SPA fallback（serverRendered=false，无 path 字段），
+// 避免水合时 SSR path 与地址栏不符把用户弹回首页
 const distPath = path.join(projectRoot, 'frontend', 'dist')
 app.use('*', serveStatic({ root: distPath }))
 app.get('/', serveStatic({ root: distPath, path: 'index.html' }))
@@ -130,19 +134,18 @@ app.get('*', serveStatic({ root: distPath, path: '200.html' }))
 const port = Number(process.env.PORT || 5679)
 console.log(`🚀 Drama Mill TS server on http://localhost:${port}`)
 
-// 进程重启后内存中的执行/轮询线程全部丢失，但任务已落库：
-// 启动时恢复 processing 任务（有上游 task_id 的继续轮询，其余重新执行），提交不因重启作废
-// DISABLE_TASK_RESUME=true 时跳过全部启动恢复与自动重提看门狗（云端冻结期用，避免重启触发续跑消耗额度）
-const taskResumeDisabled = /^(1|true|yes)$/i.test(process.env.DISABLE_TASK_RESUME || '')
-if (taskResumeDisabled) {
+// 内存里的执行/轮询线程随进程死掉，但任务状态都在库里：
+// 启动时把 processing 任务捞回来（有上游 task_id 的续轮询，没有的重跑），提交不因重启作废。
+// DISABLE_TASK_RESUME=true 会跳过下面全部恢复与看门狗——云端额度冻结期用，防止重启续跑烧额度
+if (/^(1|true|yes)$/i.test(process.env.DISABLE_TASK_RESUME || '')) {
   console.warn('[startup] DISABLE_TASK_RESUME=true：跳过任务恢复/批次续跑/资产巡检/失败重提看门狗')
 } else {
   resumeInterruptedTasks().catch(err => console.error('恢复中断任务失败:', err?.message))
-  // 批量生产编排持久化在 DB：续跑重启前处于 running 的批次（各环节幂等，断点续跑）
+  // 批量生产编排落库持久化：重启前 running 的批次断点续跑（各环节幂等）
   resumeRunningBatches().catch(err => console.error('恢复批量生产失败:', err?.message))
-  // 资产图片巡检看门狗：定期为生产中/中断项目的缺图资产重提图片任务（默认 20 分钟一轮）
+  // 资产图片巡检：周期性为生产中/中断项目缺图的资产补提图片任务（默认 20 分钟一轮）
   startAssetWatchdog()
-  // 生成任务失败自动恢复：超时视频任务判失败 + 失败任务自动重提（默认 5 分钟一轮）
+  // 失败自动恢复：超时视频任务判死 + 失败任务自动重提（默认 5 分钟一轮）
   startTaskRecoveryWatchdog()
 }
 

@@ -1,55 +1,59 @@
+# Drama Mill 一体化编排：应用 + MySQL 8.4。
+# 默认端口：应用 5679、MySQL 宿主侧 3307。生产部署前务必改 JWT_SECRET 与数据库口令。
 services:
-  mysql:
-    image: mysql:8.4
-    environment:
-      MYSQL_DATABASE: drama_mill
-      MYSQL_USER: dramamill
-      MYSQL_PASSWORD: dramamill_tool
-      MYSQL_ROOT_PASSWORD: drama-mill_root
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pdrama-mill_root"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    restart: unless-stopped
 
   drama-mill:
     build: .
+    restart: unless-stopped
     ports:
       - "5679:5679"
+    environment:
+      NODE_ENV: production
+      PORT: 5679
+      DATABASE_URL: mysql://dramamill:dramamill_tool@mysql:3306/drama_mill
+      JWT_SECRET: drama-mill-jwt-secret-change-me
+      # 分类存储外挂到独立磁盘时启用，并与下方 volumes 对应：
+      # ASSET_PATH: /media/images
+      # VIDEO_PATH: /media/videos
+      # MERGED_PATH: /media/merged
+      # UPLOAD_PATH: /media/uploads
     volumes:
       - ./data:/app/data
-      # skills 可在设置页在线编辑,且 workspace 是 Agent 文件读写 jail 根,需持久化
+      # skills 支持在线编辑且 workspace 是 Agent 文件读写 jail 根，需持久化
       - ./backend/workspace:/app/backend/workspace
-      # 存储目录隔离：分类素材可外挂卷到独立磁盘（需与 environment 中对应路径一致），示例：
-      # - /mnt/media/images:/media/images    # 配 ASSET_PATH=/media/images
-      # - /mnt/media/videos:/media/videos    # 配 VIDEO_PATH=/media/videos
-      # - /mnt/media/merged:/media/merged    # 配 MERGED_PATH=/media/merged
-      # - /mnt/media/uploads:/media/uploads  # 配 UPLOAD_PATH=/media/uploads
-    environment:
-      - NODE_ENV=production
-      - PORT=5679
-      - DATABASE_URL=mysql://dramamill:dramamill_tool@mysql:3306/drama_mill
-      # 生产环境务必修改；分类存储目录按需启用（默认在 /app/data/static 下）
-      - JWT_SECRET=drama-mill-jwt-secret-change-me
-      # - ASSET_PATH=/media/images
-      # - VIDEO_PATH=/media/videos
-      # - MERGED_PATH=/media/merged
-      # - UPLOAD_PATH=/media/uploads
-    depends_on:
-      mysql:
-        condition: service_healthy
+      # - /mnt/media/images:/media/images
+      # - /mnt/media/videos:/media/videos
+      # - /mnt/media/merged:/media/merged
+      # - /mnt/media/uploads:/media/uploads
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:5679/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       start_period: 15s
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
     restart: unless-stopped
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: drama-mill_root
+      MYSQL_DATABASE: drama_mill
+      MYSQL_USER: dramamill
+      MYSQL_PASSWORD: dramamill_tool
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pdrama-mill_root"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
   mysql-data:

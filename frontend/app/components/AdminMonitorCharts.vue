@@ -1,4 +1,8 @@
 <!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
+<!--
   AdminMonitorCharts.vue — 运行监控「24h 趋势柱状图 + 任务状态分布环形图」（纯 SVG）。
   由 admin/monitor.vue 拆分而来（单文件超限治理）；样式复用父页全局 monitor-* 类。
 -->

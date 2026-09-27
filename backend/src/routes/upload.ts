@@ -16,6 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 用户文件上传：图片 / 参考视频 / 参考音频 / 原始内容文档
+ * 全部经 saveUploadedFile 落 uploads/{user_id}/ 租户目录；
+ * 文档上传只做文本提取回显，落盘留档失败不阻断
+ */
 import { Hono } from 'hono'
 import mammoth from 'mammoth'
 import { success, badRequest } from '../utils/response.js'
@@ -28,7 +33,7 @@ function uploadNested(c: any): string {
   return String((c.get('user') as { id?: number } | undefined)?.id ?? 0)
 }
 
-// POST /upload/image
+// POST /upload/image — 参考图/头像等图片上传，附带列表页缩略图
 app.post('/image', async (c) => {
   const body = await c.req.parseBody()
   const file = body['file']
@@ -39,15 +44,17 @@ app.post('/image', async (c) => {
 
   const buffer = await file.arrayBuffer()
   const path = await saveUploadedFile(buffer, 'uploads', file.name, uploadNested(c))
-  // 同步生成列表页缩略图，上传图与生图走同一套展示链路（失败不影响上传结果）
+  // 上传图与生图共用一套展示链路：同步出缩略图，生成失败不影响上传本身
   await generateImageThumb(path)
   return success(c, { url: `/${path}`, path })
 })
 
+// 参考视频（Seedance 多模态参考）：扩展名 + MIME 双卡，50MB 上限
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.m4v'])
 const VIDEO_MIME = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'])
 const VIDEO_MAX = 50 * 1024 * 1024 // 50MB
 
+// 参考音频（Seedance 多模态参考）：20MB 上限
 const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac'])
 const AUDIO_MIME = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac'])
 const AUDIO_MAX = 20 * 1024 * 1024 // 20MB
@@ -57,6 +64,35 @@ function extOf(name: string): string {
   return i >= 0 ? name.slice(i).toLowerCase() : ''
 }
 
+const DOC_EXT = new Set(['.txt', '.md', '.docx'])
+const DOC_MAX = 10 * 1024 * 1024 // 10MB
+
+/** 编码自动识别：严格 UTF-8 解码失败则回退 GB18030（中文文档常见编码） */
+function decodeTextBuffer(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return new TextDecoder('gb18030').decode(bytes)
+  }
+}
+
+/** 去 BOM + 统一换行为 \n + 压缩连续空行 */
+function normalizeText(raw: string): string {
+  return raw
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// POST /upload/video
+app.post('/video', async (c) => saveMediaUpload(c, 'video', VIDEO_EXT, VIDEO_MIME, VIDEO_MAX))
+
+// POST /upload/audio
+app.post('/audio', async (c) => saveMediaUpload(c, 'audio', AUDIO_EXT, AUDIO_MIME, AUDIO_MAX))
+
+// 媒体上传通用校验：扩展名白名单 + MIME 双卡 + 体积上限
 async function saveMediaUpload(
   c: any,
   kind: 'video' | 'audio',
@@ -84,35 +120,7 @@ async function saveMediaUpload(
   return success(c, { url: `/${path}`, path })
 }
 
-// POST /upload/video — 参考视频上传（Seedance 多模态参考用）
-app.post('/video', async (c) => saveMediaUpload(c, 'video', VIDEO_EXT, VIDEO_MIME, VIDEO_MAX))
-
-// POST /upload/audio — 参考音频上传（Seedance 多模态参考用）
-app.post('/audio', async (c) => saveMediaUpload(c, 'audio', AUDIO_EXT, AUDIO_MIME, AUDIO_MAX))
-
-const DOC_EXT = new Set(['.txt', '.md', '.docx'])
-const DOC_MAX = 10 * 1024 * 1024 // 10MB
-
-/** 编码自动识别：严格 UTF-8 解码失败则回退 GB18030（中文文档常见编码） */
-function decodeTextBuffer(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch {
-    return new TextDecoder('gb18030').decode(bytes)
-  }
-}
-
-/** 去 BOM + 统一换行为 \n + 压缩连续空行 */
-function normalizeText(raw: string): string {
-  return raw
-    .replace(/^\uFEFF/, '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
-
-// POST /upload/document — 原始内容文件上传（.txt/.md/.docx），返回提取后的文本供前端填入原始内容
+// POST /upload/document — 提取 .txt/.md/.docx 正文回给前端填"原始内容"
 app.post('/document', async (c) => {
   const body = await c.req.parseBody()
   const file = body['file']

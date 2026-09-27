@@ -17,75 +17,60 @@
  */
 
 /**
- * 图片生成 Provider Adapter 接口
+ * 生图厂商适配层契约。一个实现类接管某 provider 的全部 HTTP 方言：
+ * 拼请求（build*）、判形态（parseGenerateResponse 同步/异步）、
+ * 轮询解包（parsePollResponse）、结果取图（extract*）。
  */
 export interface ImageProviderAdapter {
-  /** 厂商标识 */
+  /** provider 键名（注册表索引） */
   provider: string
 
-  /**
-   * 构建图片生成请求
-   * @param config AI 配置 { baseUrl, apiKey, model }
-   * @param record 图片生成记录
-   */
+  /** 组装一次生成调用的完整 HTTP 描述 */
   buildGenerateRequest(config: AIConfig, record: ImageGenerationRecord): ProviderRequest
 
-  /**
-   * 解析生成响应，判断是同步还是异步
-   */
+  /** 判定生成响应形态：拿到图片 URL 还是只拿到待轮询的 taskId */
   parseGenerateResponse(result: any): ImageGenResponse
 
-  /**
-   * 构建轮询请求
-   * @param config AI 配置
-   * @param taskId 任务 ID
-   */
+  /** 异步形态下组装轮询请求 */
   buildPollRequest(config: AIConfig, taskId: string): ProviderRequest
 
-  /**
-   * 解析轮询响应
-   */
+  /** 解包轮询响应为统一状态机 */
   parsePollResponse(result: any): ImagePollResponse
 
-  /**
-   * 从响应中提取图片 URL（用于直接下载）
-   * 返回 null 表示图片数据是 base64 格式，需要用 extractImageBase64 处理
-   */
+  /** 响应里现成的图片 URL（可直接下载）；返回 null 说明载荷是 base64，改走 extractImageBase64 */
   extractImageUrl(result: any): string | null
 
-  /**
-   * 从响应中提取 base64 图片数据
-   * 仅用于 Gemini 等只返回 base64 的厂商
-   */
+  /** 内联 base64 图片提取消（Gemini 这类不回 URL、只回字节流的厂商） */
   extractImageBase64(result: any): { data: string; mimeType: string } | null
 
   /**
-   * 自定义执行生成请求（可选）
-   * 部分模型（如百炼 wan2.6-image）仅支持 SSE 流式输出，无法走统一 fetch+JSON 流程，
-   * 适配器可自行发起请求并收敛为与 parseGenerateResponse 兼容的最终结果对象
+   * 逃生舱：需要完全接管一次生成调用时才实现。
+   * 例如百炼 wan2.6-image 只认 SSE 流式返回，套不进统一的 fetch+JSON 管道，
+   * 由适配器自行收流，最后归约成 parseGenerateResponse 认得的形状。
    */
   executeGenerate?(config: AIConfig, record: ImageGenerationRecord): Promise<any>
 }
 
-/**
- * 视频生成 Provider Adapter 接口
- */
+/** 生视频厂商适配层契约（全部为异步任务制，故无内联图片类钩子） */
 export interface VideoProviderAdapter {
   provider: string
 
   buildGenerateRequest(config: AIConfig, record: VideoGenerationRecord): ProviderRequest
 
+  /** 提交响应：一般只回 taskId；个别同步直出视频 URL 的网关也在此表达 */
   parseGenerateResponse(result: any): VideoGenResponse
 
   buildPollRequest(config: AIConfig, taskId: string): ProviderRequest
 
   parsePollResponse(result: any): VideoPollResponse
 
+  /** 从任意响应形态中捞出可下载地址 */
   extractVideoUrl(result: any): string | null
 }
 
-// ============ 通用类型 ============
+// ============ 以下为实现层共享的传输/负载类型 ============
 
+/** 一次出站 HTTP 调用的完整描述（URL/method/headers/body 四件套） */
 export interface ProviderRequest {
   url: string
   method: string
@@ -93,21 +78,23 @@ export interface ProviderRequest {
   body: any
 }
 
+/** 一条 AI 服务配置展开后的运行期视图 */
 export interface AIConfig {
   provider: string
   baseUrl: string
   apiKey: string
   model: string
-  /** 配置内全部模型（model 字段 JSON 数组）；多模型分流时按上游负载选模型，缺省仅 model 单模型 */
+  /** 该配置挂载的全部模型（model 列 JSON 数组）；网关分流时按负载选路，未配置退化为单 model */
   models?: string[]
-  /** 配置 ID（限流按网关自适应/成本归属用；重启恢复链路可能缺失） */
+  /** 所属配置行 ID：网关限流与成本归集要按它分组；任务重启恢复路径可能拿不到 */
   configId?: number
-  /** 采样温度（跟随服务商默认时为 null） */
+  /** 采样温度；服务商默认即 null */
   temperature?: number | null
-  /** 网关限流 QPM（每分钟请求数）；缺省用全局默认提交间隔 */
+  /** 网关每分钟提交配额，空则走全局默认提交间隔 */
   qpm?: number | null
 }
 
+/** 生图任务行（只暴露适配器会用到的列） */
 export interface ImageGenerationRecord {
   id: number
   model?: string | null
@@ -118,6 +105,7 @@ export interface ImageGenerationRecord {
   // ... 其他字段
 }
 
+/** 生视频任务行（只暴露适配器会用到的列） */
 export interface VideoGenerationRecord {
   id: number
   model?: string | null
@@ -136,13 +124,14 @@ export interface VideoGenerationRecord {
   // ... 其他字段
 }
 
+/** 生成提交后的二选一形态：imageUrl（同步直出）或 taskId（转轮询） */
 export interface ImageGenResponse {
   isAsync: boolean
   taskId?: string
-  /** 同步模式下直接返回的图片 URL */
   imageUrl?: string
 }
 
+/** 轮询归一化状态 */
 export interface ImagePollResponse {
   status: 'pending' | 'processing' | 'completed' | 'failed'
   imageUrl?: string

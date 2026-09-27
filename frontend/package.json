@@ -1,6 +1,8 @@
 {
   "name": "drama-mill-frontend",
+  "version": "1.0.0",
   "private": true,
+  "description": "Drama Mill 前端：Nuxt 3 + Vue 3，纯 CSS 无组件库",
   "author": "Drama Mill",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -9,8 +11,8 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "test": "node --test 'tests/*.test.mjs'",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "test": "node --test 'tests/*.test.mjs'"
   },
   "dependencies": {
     "lucide-vue-next": "^0.511.0",

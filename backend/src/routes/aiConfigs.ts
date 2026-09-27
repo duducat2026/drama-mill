@@ -16,6 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * AI 服务配置管理：CRUD + 连通性探测(/test) + 极简生成测试(/:id/generate-test)
+ * 配置按 user_id 行级隔离，越权一律按不存在处理（notFound，不泄露存在性）
+ * generate-test 失败也回 200 + ok:false 的结构化诊断，黑盒 err.message 查不出根因
+ */
 import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
@@ -30,6 +35,14 @@ import { normalizeTemperature, parseModelList, withParsedFields, bearerHeaders, 
 
 const app = new Hono()
 
+/** 取自己名下的配置行；查不到或属主不符返回 null（调用侧统一 404） */
+async function findOwnConfig(id: number, userId: number) {
+  const [row] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
+  if (!row || row.userId !== userId) return null
+  return row
+}
+
+// GET /ai-configs — 我的配置列表，可按 service_type 过滤
 app.get('/', async (c) => {
   const user = c.get('user')
   const serviceType = c.req.query('service_type')
@@ -37,17 +50,15 @@ app.get('/', async (c) => {
     .filter(r => r.userId === user.id)
   if (serviceType) rows = rows.filter(r => r.serviceType === serviceType)
 
-  const parsed = rows.map(withParsedFields)
-  return success(c, parsed)
+  return success(c, rows.map(withParsedFields))
 })
 
-// POST /ai-configs
+// POST /ai-configs — 新建配置（provider 必须在官方白名单内）
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()
   const ts = now()
 
-  // 验证必填字段
   if (!body.service_type || !body.provider) {
     return badRequest(c, 'service_type and provider are required')
   }
@@ -65,18 +76,18 @@ app.post('/', async (c) => {
   }
 
   const res = await db.insert(schema.aiServiceConfigs).values({
-    serviceType: body.service_type,
-    provider: body.provider,
-    name: body.name || `${body.provider}-${body.service_type}`,
-    baseUrl: body.base_url || '',
-    apiKey: body.api_key || '',
-    model: JSON.stringify(body.model || []),
-    priority: body.priority || 0,
-    isActive: true,
     settings: temperature !== null ? JSON.stringify({ temperature }) : null,
     userId: user.id,
     createdAt: ts,
     updatedAt: ts,
+    isActive: true,
+    priority: body.priority || 0,
+    model: JSON.stringify(body.model || []),
+    apiKey: body.api_key || '',
+    baseUrl: body.base_url || '',
+    name: body.name || `${body.provider}-${body.service_type}`,
+    provider: body.provider,
+    serviceType: body.service_type,
   })
 
   const [row] = await db.select().from(schema.aiServiceConfigs)
@@ -85,7 +96,17 @@ app.post('/', async (c) => {
   return created(c, withParsedFields(row))
 })
 
-// POST /ai-configs/test
+// 空体探测里属于"参数没带"的报错：鉴权与路径都已通过，判连通而不算失败
+const PARAM_REJECTED = /BadRequest\.Empty(Model|Parameter|Input)|Required parameter|missing from request|invalid model format|invalid_request_error/i
+const REACHABLE_STATUS = [200, 204, 400, 401, 403]
+
+function probeMessage(reachable: boolean, ok: boolean, httpOk: boolean) {
+  if (!reachable) return '端点未按预期响应，请检查 Base URL 和代理前缀'
+  if (ok) return httpOk ? '端点可访问，认证与路径基本正常' : '端点可访问，认证已通过（空体探测触发参数校验，属预期）'
+  return '端点已响应，请根据状态码判断认证或路径是否正确'
+}
+
+// POST /ai-configs/test — 连通性探测：不发真实生成参数，只看端点/鉴权
 app.post('/test', async (c) => {
   const body = await c.req.json()
   if (!body.service_type || !body.provider || !body.base_url) {
@@ -100,10 +121,7 @@ app.post('/test', async (c) => {
   const probeUrl = redactUrl(probe.url)
 
   logTaskProgress('AIConfig', 'probe-start', {
-    serviceType: body.service_type,
-    provider: body.provider,
-    method: probe.method,
-    url: probeUrl,
+    url: probeUrl, method: probe.method, provider: body.provider, serviceType: body.service_type,
   })
 
   try {
@@ -113,11 +131,8 @@ app.post('/test', async (c) => {
       body: probe.body ? JSON.stringify(probe.body) : undefined,
     })
     const text = await resp.text()
-    const reachable = [200, 204, 400, 401, 403].includes(resp.status)
-    // 空体探测的参数校验类报错（如百炼 BadRequest.EmptyModel、Model Router 的 invalid model format）：
-    // 鉴权已通过、端点正确，视为连通成功，避免误报失败；真实请求参数由实际生成时携带。
-    const paramValidationError =
-      resp.status === 400 && /BadRequest\.Empty(Model|Parameter|Input)|Required parameter|missing from request|invalid model format|invalid_request_error/i.test(text)
+    const reachable = REACHABLE_STATUS.includes(resp.status)
+    const paramValidationError = resp.status === 400 && PARAM_REJECTED.test(text)
     const ok = resp.ok || paramValidationError
     const payload = {
       ok,
@@ -126,33 +141,17 @@ app.post('/test', async (c) => {
       status_text: resp.statusText,
       method: probe.method,
       url: probeUrl,
-      message: reachable
-        ? (ok
-          ? (resp.ok ? '端点可访问，认证与路径基本正常' : '端点可访问，认证已通过（空体探测触发参数校验，属预期）')
-          : '端点已响应，请根据状态码判断认证或路径是否正确')
-        : '端点未按预期响应，请检查 Base URL 和代理前缀',
+      message: probeMessage(reachable, ok, resp.ok),
       response_preview: text.slice(0, 240),
     }
     if (reachable) {
-      logTaskSuccess('AIConfig', 'probe-done', {
-        provider: body.provider,
-        status: resp.status,
-        url: probeUrl,
-      })
+      logTaskSuccess('AIConfig', 'probe-done', { url: probeUrl, status: resp.status, provider: body.provider })
     } else {
-      logTaskError('AIConfig', 'probe-unexpected', {
-        provider: body.provider,
-        status: resp.status,
-        url: probeUrl,
-      })
+      logTaskError('AIConfig', 'probe-unexpected', { url: probeUrl, status: resp.status, provider: body.provider })
     }
     return success(c, payload)
   } catch (error: any) {
-    logTaskError('AIConfig', 'probe-failed', {
-      provider: body.provider,
-      url: probeUrl,
-      error: error.message,
-    })
+    logTaskError('AIConfig', 'probe-failed', { error: error.message, url: probeUrl, provider: body.provider })
     return success(c, {
       ok: false,
       reachable: false,
@@ -164,9 +163,7 @@ app.post('/test', async (c) => {
   }
 })
 
-// POST /ai-configs/:id/generate-test — 极简生成测试（文本同步回传结果；图片/视频提交任务返回 task_id 供轮询）
-// 失败按 200 + ok:false 回传结构化诊断（与「测试配置」探测同形）：只透一句 err.message
-// 会出现「生成失败」这类查不出原因的黑盒提示，上游状态码/错误码/request_id 都在包装层里。
+// POST /ai-configs/:id/generate-test — 真发一枪：文本同步回文，图片/视频回 task_id 供轮询
 app.post('/:id/generate-test', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
@@ -182,13 +179,13 @@ app.post('/:id/generate-test', async (c) => {
   } catch (error: any) {
     const detail = describeFailure(error, { serviceType: row.serviceType, provider: row.provider })
     logTaskError('AIConfig', 'generate-test-failed', {
-      configId: id,
-      serviceType: row.serviceType,
-      provider: row.provider,
-      kind: detail.kind,
-      upstreamStatus: detail.upstream_status,
-      requestId: detail.request_id,
       error: detail.raw.slice(0, 300),
+      requestId: detail.request_id,
+      upstreamStatus: detail.upstream_status,
+      kind: detail.kind,
+      provider: row.provider,
+      serviceType: row.serviceType,
+      configId: id,
     })
     return success(c, {
       ok: false,
@@ -217,19 +214,26 @@ app.post('/:id/generate-test', async (c) => {
 // GET /ai-configs/:id
 app.get('/:id', async (c) => {
   const user = c.get('user')
-  const id = Number(c.req.param('id'))
-  const [row] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
-  if (!row || row.userId !== user.id) return notFound(c)
+  const row = await findOwnConfig(Number(c.req.param('id')), user.id)
+  if (!row) return notFound(c)
   return success(c, withParsedFields(row))
 })
 
-// PUT /ai-configs/:id
+// PUT /ai-configs/:id — 增量更新；service_type/provider 合并现值后仍需过白名单
+const PUT_FIELD_MAP: Record<string, string> = {
+  name: 'name',
+  base_url: 'baseUrl',
+  api_key: 'apiKey',
+  priority: 'priority',
+  is_active: 'isActive',
+}
+
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
-  const [existing] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
-  if (!existing || existing.userId !== user.id) return notFound(c)
+  const existing = await findOwnConfig(id, user.id)
+  if (!existing) return notFound(c)
 
   const serviceType = 'service_type' in body ? body.service_type : existing.serviceType
   const provider = 'provider' in body ? body.provider : existing.provider
@@ -238,15 +242,13 @@ app.put('/:id', async (c) => {
   }
 
   const updates: Record<string, any> = { updatedAt: now() }
-
+  // 服务类型与供应商显式落键（与上方白名单校验同源），其余字段走映射表
   if ('service_type' in body) updates.serviceType = body.service_type
   if ('provider' in body) updates.provider = body.provider
-  if ('name' in body) updates.name = body.name
-  if ('base_url' in body) updates.baseUrl = body.base_url
-  if ('api_key' in body) updates.apiKey = body.api_key
+  for (const [snake, camel] of Object.entries(PUT_FIELD_MAP)) {
+    if (snake in body) updates[camel] = body[snake]
+  }
   if ('model' in body) updates.model = JSON.stringify(body.model)
-  if ('priority' in body) updates.priority = body.priority
-  if ('is_active' in body) updates.isActive = body.is_active
   if ('temperature' in body) {
     let temperature: number | null
     try {
@@ -266,17 +268,16 @@ app.put('/:id', async (c) => {
   return success(c)
 })
 
-// DELETE /ai-configs/:id
+// DELETE /ai-configs/:id — 物理删行
 app.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
-  const [row] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
-  if (!row || row.userId !== user.id) return notFound(c)
+  if (!await findOwnConfig(id, user.id)) return notFound(c)
   await db.delete(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
   return success(c)
 })
 
-// GET /ai-providers
+// GET /ai-providers — 供应商目录（预置模型 JSON 展开后给前端）
 export const aiProviders = new Hono()
 aiProviders.get('/', async (c) => {
   const rows = await db.select().from(schema.aiServiceProviders)

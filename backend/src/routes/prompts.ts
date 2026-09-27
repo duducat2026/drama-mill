@@ -17,9 +17,9 @@
  */
 
 /**
- * Agent prompt 管理路由 — 读写 workspace/prompts/<agent_type>.md
- * 文件操作 jail 在 backend/workspace/ 目录内（仿 skills 路由）
- * 平台级配置仅管理员可改：挂 adminGuard（运行时 Agent 直接读文件，不经此 HTTP 层）
+ * Agent 提示词管理接口
+ * 后端存储是 workspace/prompts/<agent_type>.md 文件，读写 jails 在 backend/workspace 内；
+ * 属于平台级配置，整条路由挂 adminGuard——运行时 Agent 直接读文件层，不走这组 HTTP。
  */
 import { Hono } from 'hono'
 import { success, badRequest } from '../utils/response.js'
@@ -32,49 +32,40 @@ const app = new Hono()
 app.use('*', adminGuard)
 const fsm = () => skillsManagerWorkspace.filesystem!
 
-const checkType = (type: string) => validAgentTypes.includes(type)
+// agent_type 白名单外一律 400，防目录穿越
+const isKnownType = (type: string) => validAgentTypes.includes(type)
 
-// GET /prompts — 列出全部 Agent 的 prompt 状态
+/** 单条 prompt 的响应形状：文件行与代码默认行合并到这里统一吐出 */
+function promptPayload(type: string, file: Awaited<ReturnType<typeof loadAgentPromptFile>>, withInstructions: boolean) {
+  const fallback = DEFAULT_PROMPTS[type]
+  const record: Record<string, any> = {
+    agent_type: type,
+    name: file?.name || fallback.name,
+    model: file?.model || '',
+    is_default: !file,
+  }
+  if (withInstructions) record.system_prompt = file ? file.instructions : fallback.instructions
+  return record
+}
+
+// GET /prompts — 全部 Agent 的 prompt 概览（不带正文）
 app.get('/', async (c) => {
-  const list = await Promise.all(validAgentTypes.map(async (type) => {
-    const file = await loadAgentPromptFile(type)
-    return {
-      agent_type: type,
-      name: file?.name || DEFAULT_PROMPTS[type].name,
-      model: file?.model || '',
-      is_default: !file,
-    }
-  }))
+  const list = await Promise.all(validAgentTypes.map(async (type) =>
+    promptPayload(type, await loadAgentPromptFile(type), false)))
   return success(c, list)
 })
 
-// GET /prompts/:type — 有效内容（文件优先，缺失回退代码默认）
+// GET /prompts/:type — 有效内容：有文件用文件，没有回退代码内置默认
 app.get('/:type', async (c) => {
   const type = c.req.param('type')
-  if (!checkType(type)) return badRequest(c, 'Unknown agent type')
-  const file = await loadAgentPromptFile(type)
-  if (file) {
-    return success(c, {
-      agent_type: type,
-      name: file.name || DEFAULT_PROMPTS[type].name,
-      model: file.model,
-      system_prompt: file.instructions,
-      is_default: false,
-    })
-  }
-  return success(c, {
-    agent_type: type,
-    name: DEFAULT_PROMPTS[type].name,
-    model: '',
-    system_prompt: DEFAULT_PROMPTS[type].instructions,
-    is_default: true,
-  })
+  if (!isKnownType(type)) return badRequest(c, 'Unknown agent type')
+  return success(c, promptPayload(type, await loadAgentPromptFile(type), true))
 })
 
-// PUT /prompts/:type — 保存为 prompt 文件
+// PUT /prompts/:type — 把编辑结果序列化成 md 文件落盘
 app.put('/:type', async (c) => {
   const type = c.req.param('type')
-  if (!checkType(type)) return badRequest(c, 'Unknown agent type')
+  if (!isKnownType(type)) return badRequest(c, 'Unknown agent type')
   const body = await c.req.json()
   const instructions = String(body.system_prompt ?? '').trim()
   if (!instructions) return badRequest(c, 'system_prompt required')
@@ -84,10 +75,10 @@ app.put('/:type', async (c) => {
   return success(c, { agent_type: type, name, model, is_default: false })
 })
 
-// POST /prompts/:type/reset — 删除文件，回退代码默认值
+// POST /prompts/:type/reset — 删掉 md 文件即回退默认
 app.post('/:type/reset', async (c) => {
   const type = c.req.param('type')
-  if (!checkType(type)) return badRequest(c, 'Unknown agent type')
+  if (!isKnownType(type)) return badRequest(c, 'Unknown agent type')
   const path = promptFilePath(type)
   if (await fsm().exists(path)) await fsm().deleteFile(path)
   return success(c, { agent_type: type, is_default: true })

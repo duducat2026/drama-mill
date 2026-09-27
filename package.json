@@ -4,7 +4,7 @@
   "private": true,
   "author": "Drama Mill",
   "license": "AGPL-3.0-only",
-  "description": "Drama Mill 部署脚本（本地与云端通用，不依赖 Docker）",
+  "description": "Drama Mill 一键部署入口：本地 build/start 与云端 publish（PM2，免 Docker）",
   "scripts": {
     "deploy": "bash deployment/deploy.sh",
     "deploy:backend": "bash deployment/deploy.sh --backend-only",

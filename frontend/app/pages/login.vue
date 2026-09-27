@@ -56,10 +56,9 @@
         </button>
       </form>
 
-      <!-- 首次部署默认账号提示（种子账号，登录后应立即改密） -->
+      <!-- 首次部署默认账号提示（仅普通用户；管理员账号见 README，不在公开登录页暴露） -->
       <div class="login-hint">
         <div class="login-hint-title">首次部署默认账号</div>
-        <div class="login-hint-row"><span>管理员</span><code>drama-mill</code><span>/</span><code>drama-mill</code></div>
         <div class="login-hint-row"><span>普通用户</span><code>test</code><span>/</span><code>drama-mill</code></div>
         <div class="login-hint-note">请在「右上角账号区 → 修改密码」中及时更换默认口令。</div>
       </div>

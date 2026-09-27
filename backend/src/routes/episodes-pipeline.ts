@@ -1,3 +1,7 @@
+/**
+ * Drama Mill — AI 短剧生成平台
+ * AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+ */
 /*
  * Drama Mill — episodes 子路由：提取/视频提示词/耗时/分镜/生成任务/流水线状态
  */

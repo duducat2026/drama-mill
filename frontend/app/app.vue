@@ -16,12 +16,17 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 
+<!-- 应用根壳：布局包裹页面 + 顶部路由进度条 + 全局 toast 容器 -->
 <template>
   <NuxtLayout>
     <NuxtPage />
   </NuxtLayout>
-  <NuxtLoadingIndicator color="#3b82f6" :height="2" :duration="3000" />
-  <Toaster position="top-right" :duration="3000" />
+
+  <!-- 路由切换进度条：挂在根层，任何布局内页面导航都有反馈 -->
+  <NuxtLoadingIndicator :height="2" :duration="3000" color="#3b82f6" />
+
+  <!-- vue-sonner：右上角出栈，3 秒自动消失 -->
+  <Toaster :duration="3000" position="top-right" />
 </template>
 
 <script setup>
@@ -29,5 +34,5 @@ import { Toaster } from 'vue-sonner'
 </script>
 
 <style>
-@import url('./assets/studio.css');
+@import '~/assets/studio.css';
 </style>

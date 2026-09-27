@@ -17,7 +17,10 @@
  */
 
 /**
- * AI 服务抽象层 — 从数据库配置中获取 provider 和 API key
+ * AI 配置解析层
+ * 文本/图片/视频三类调用统一从这里取服务商、密钥、端点与模型清单：
+ * 服务商必须命中 officialProviders 白名单，白名单外的配置一律按无效处理。
+ * 用户级模型调用总开关也在此入口拦截（在途任务恢复链路除外）。
  */
 import { db, schema } from '../db/index.js'
 import { eq } from 'drizzle-orm'
@@ -32,49 +35,50 @@ export interface AIConfig {
   baseUrl: string
   apiKey: string
   model: string
-  /** 配置内全部模型（model 字段 JSON 数组）；多模型分流时按上游负载选模型，缺省仅 model 单模型 */
+  /** 配置勾选的全部模型（model 字段是 JSON 数组）；多模型分流时按上游负载挑选，未设置时仅有 model */
   models?: string[]
-  /** 配置 ID（限流按网关自适应/成本归属用；重启恢复链路可能缺失） */
+  /** 配置 ID（网关自适应限流与成本归属依赖；重启恢复链路可能拿不到） */
   configId?: number
-  /** 采样温度，null 表示不设置（跟随服务商默认）。存于 ai_service_configs.settings JSON */
+  /** 采样温度，null 表示不下发（跟随服务商默认）；存于 ai_service_configs.settings JSON */
   temperature?: number | null
-  /** 网关限流 QPM（每分钟请求数），存于 settings JSON；缺省用全局默认间隔 */
+  /** 网关限流 QPM（每分钟请求数），存于 settings JSON；缺省走全局默认间隔 */
   qpm?: number | null
+}
+
+/** settings JSON 里读一个数字项；解析失败/类型不符/非有限值统一归 null；positiveOnly 时非正数也归 null */
+function pickSettingNumber(settingsRaw: string | null | undefined, key: string, positiveOnly = false): number | null {
+  if (!settingsRaw) return null
+  try {
+    const value = JSON.parse(settingsRaw)?.[key]
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null
+    return positiveOnly && value <= 0 ? null : value
+  } catch {
+    return null
+  }
 }
 
 /** 从 settings JSON 解析 temperature；非法值一律视为未设置 */
 export function parseConfigTemperature(settingsRaw: string | null | undefined): number | null {
-  if (!settingsRaw) return null
-  try {
-    const t = JSON.parse(settingsRaw)?.temperature
-    return typeof t === 'number' && Number.isFinite(t) ? t : null
-  } catch {
-    return null
-  }
+  return pickSettingNumber(settingsRaw, 'temperature')
 }
 
 /** 从 settings JSON 解析 qpm（网关限流，每分钟请求数）；非法/缺失返回 null */
 export function parseConfigQpm(settingsRaw: string | null | undefined): number | null {
-  if (!settingsRaw) return null
-  try {
-    const q = JSON.parse(settingsRaw)?.qpm
-    return typeof q === 'number' && Number.isFinite(q) && q > 0 ? q : null
-  } catch {
-    return null
-  }
+  return pickSettingNumber(settingsRaw, 'qpm', true)
 }
 
 export const officialProviders: Record<ServiceType, readonly string[]> = {
-  // 文本新增百炼：走 OpenAI 兼容模式（base_url 以 compatible-mode/v1 结尾），运行时复用 createOpenAI
+  // 文本侧百炼走 OpenAI 兼容模式（base_url 以 compatible-mode/v1 收尾），运行时复用 createOpenAI
   text: ['openai', 'gemini', 'volcengine', 'dashscope', 'model-router'],
   image: ['openai', 'gemini', 'volcengine', 'dashscope', 'model-router'],
-  // Model Router 网关：文本走 OpenAI Chat 兼容，图片/视频走 DashScope 兼容体（端点在 /v1 下）
+  // Model Router 网关：文本按 OpenAI Chat 兼容、图片/视频按 DashScope 兼容体（端点同在 /v1 下）
   video: ['volcengine', 'minimax', 'dashscope', 'model-router'],
 }
 
 export function isOfficialProvider(serviceType?: string | null, provider?: string | null): boolean {
-  const providers = officialProviders[serviceType as ServiceType]
-  return !!providers && providers.includes((provider || '').toLowerCase())
+  const allowed = officialProviders[serviceType as ServiceType]
+  if (!allowed) return false
+  return allowed.includes((provider || '').toLowerCase())
 }
 
 export function getTextProviderBaseUrl(config: AIConfig) {
@@ -84,7 +88,7 @@ export function getTextProviderBaseUrl(config: AIConfig) {
     return joinProviderUrl(config.baseUrl, '/v1', '')
   }
 
-  // Model Router 文本走 OpenAI Chat 兼容协议，端点同样挂在 /v1 下
+  // Model Router 文本同样按 OpenAI Chat 兼容协议处理，端点挂在 /v1
   if (provider === 'model-router') {
     return joinProviderUrl(config.baseUrl, '/v1', '')
   }
@@ -93,6 +97,7 @@ export function getTextProviderBaseUrl(config: AIConfig) {
     return joinProviderUrl(config.baseUrl, '/v1beta', '')
   }
 
+  // 火山方舟文本走自家 /api/v3；其余厂商（如百炼）按 baseUrl 原样使用
   if (provider === 'volcengine') {
     return joinProviderUrl(config.baseUrl, '/api/v3', '')
   }
@@ -100,9 +105,9 @@ export function getTextProviderBaseUrl(config: AIConfig) {
   return config.baseUrl
 }
 
-// Agent 多步循环会逐步重复解析同一配置，相同配置只打一次日志避免刷屏
-const lastLoggedActiveConfigKey = new Map<string, string>()
-const lastLoggedConfigByIdKey = new Map<number, string>()
+// Agent 多步循环会逐步重复解析同一配置，配置内容没变就只打一次日志避免刷屏
+const activeConfigLogStamp = new Map<string, string>()
+const configByIdLogStamp = new Map<number, string>()
 
 /**
  * 解析文本调用的计价元数据（供成本采集）：指定 configId 优先，否则取用户启用配置；
@@ -111,8 +116,8 @@ const lastLoggedConfigByIdKey = new Map<number, string>()
 export async function resolveTextConfigMeta(userId?: number | null, configId?: number | null): Promise<{ configId: number | null; provider: string; model: string } | null> {
   let row = null
   if (configId) {
-    const [r] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, configId))
-    row = r || null
+    const [hit] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, configId))
+    row = hit ?? null
   }
   if (!row) row = await selectActiveConfig('text', userId)
   if (!row) return null
@@ -122,12 +127,16 @@ export async function resolveTextConfigMeta(userId?: number | null, configId?: n
 
 /** 按用户维度取启用配置：指定 userId 时只在该用户的配置中选；未指定（历史任务/管理链路）退回全量 */
 async function selectActiveConfig(serviceType: ServiceType, userId?: number | null) {
-  const rows = (await db.select().from(schema.aiServiceConfigs)
+  const rows = await db.select().from(schema.aiServiceConfigs)
     .where(eq(schema.aiServiceConfigs.serviceType, serviceType))
-  )
-    .filter(r => r.isActive && isOfficialProvider(serviceType, r.provider) && (userId == null || r.userId === userId))
-    .sort((a, b) => (b.priority || 0) - (a.priority || 0)) // 高优先级优先
-  return rows[0] ?? null
+  const usable = rows.filter(r =>
+    r.isActive
+    && isOfficialProvider(serviceType, r.provider)
+    && (userId == null || r.userId === userId))
+  if (!usable.length) return null
+  // priority 数值大的排前面
+  usable.sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  return usable[0]
 }
 
 export async function getActiveConfig(serviceType: ServiceType, userId?: number | null): Promise<AIConfig | null> {
@@ -151,29 +160,19 @@ async function loadActiveConfig(serviceType: ServiceType, userId?: number | null
     logTaskWarn('AIConfig', 'active-config-missing', { serviceType, userId })
     return null
   }
-
-  const models = active.model ? JSON.parse(active.model) : []
-  const logKey = `${active.id}:${models[0] || ''}`
-  if (lastLoggedActiveConfigKey.get(serviceType) !== logKey) {
-    lastLoggedActiveConfigKey.set(serviceType, logKey)
+  const config = toAIConfig(active)
+  const stamp = `${active.id}:${config.model}`
+  if (activeConfigLogStamp.get(serviceType) !== stamp) {
+    activeConfigLogStamp.set(serviceType, stamp)
     logTaskProgress('AIConfig', 'active-config-selected', {
       serviceType,
       configId: active.id,
       provider: active.provider,
-      model: models[0] || '',
+      model: config.model,
       priority: active.priority,
     })
   }
-  return {
-    provider: active.provider || '',
-    baseUrl: active.baseUrl,
-    apiKey: active.apiKey,
-    model: models[0] || '',
-    models: models.filter((m: any) => typeof m === 'string' && m.trim()),
-    configId: active.id,
-    temperature: parseConfigTemperature(active.settings),
-    qpm: parseConfigQpm(active.settings),
-  }
+  return config
 }
 
 export async function getTextConfig(userId?: number | null): Promise<AIConfig> {
@@ -187,7 +186,7 @@ export async function getTextConfig(userId?: number | null): Promise<AIConfig> {
  */
 export async function getActiveConfigId(serviceType: ServiceType, userId?: number | null): Promise<number | null> {
   const row = await selectActiveConfig(serviceType, userId)
-  return row?.id ?? null
+  return row ? row.id : null
 }
 
 /** ai_service_configs 行 → AIConfig（models 首位为默认模型） */
@@ -222,18 +221,18 @@ export async function getConfigById(id: number): Promise<AIConfig | null> {
     })
     return null
   }
-  const models = row.model ? JSON.parse(row.model) : []
-  const logKey = `${row.provider}:${models[0] || ''}:${row.serviceType}`
-  if (lastLoggedConfigByIdKey.get(id) !== logKey) {
-    lastLoggedConfigByIdKey.set(id, logKey)
+  const config = toAIConfig(row)
+  const stamp = `${row.provider}:${config.model}:${row.serviceType}`
+  if (configByIdLogStamp.get(id) !== stamp) {
+    configByIdLogStamp.set(id, stamp)
     logTaskProgress('AIConfig', 'config-by-id-selected', {
       configId: id,
       provider: row.provider,
-      model: models[0] || '',
+      model: config.model,
       serviceType: row.serviceType,
     })
   }
-  return toAIConfig(row)
+  return config
 }
 
 /**

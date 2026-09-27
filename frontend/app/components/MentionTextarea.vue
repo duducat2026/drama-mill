@@ -16,38 +16,42 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 
+<!--
+  @ 引用文本域：透明 textarea 叠在高亮镜像层上，输入 @ 弹分组下拉选参考资产
+  纯文本逻辑（HTML 高亮/光标坐标/引用识别）在 composables/useMentionTextarea
+-->
 <template>
-  <div class="mention-textarea" ref="wrapEl">
-    <!-- 高亮镜像层：渲染与 textarea 完全相同的文本，@引用 着彩色；textarea 文字透明、仅显示光标 -->
-    <div ref="backdropEl" :class="[inputClass, 'mention-backdrop']" aria-hidden="true">
-      <div class="mention-backdrop-content" v-html="highlightedHtml"></div>
+  <div ref="wrapEl" class="mention-textarea">
+    <!-- 镜像层与 textarea 渲染同一文本，只负责给 @引用 上色 -->
+    <div ref="backdropEl" aria-hidden="true" :class="[inputClass, 'mention-backdrop']">
+      <div class="mention-backdrop-content" v-html="highlightedHtml" />
     </div>
     <textarea
       ref="taEl"
-      :class="[inputClass, 'mention-input']"
       :rows="rows"
-      :placeholder="placeholder"
       :value="text"
-      @input="onInput"
-      @keydown="onKeydown"
-      @blur="onBlur"
+      :placeholder="placeholder"
+      :class="[inputClass, 'mention-input']"
       @click="closeMention"
+      @blur="onBlur"
+      @input="onInput"
       @scroll="onScroll"
+      @keydown="onKeydown"
     />
     <Teleport to="body">
       <div v-if="mention.open" ref="dropdownEl" class="mention-dropdown" :style="mentionStyle">
-        <template v-if="groupedFiltered.length">
-          <template v-for="(group, gi) in groupedFiltered" :key="group.group">
-            <div class="mention-group-label">{{ group.group }}</div>
+        <template v-if="groupedOptions.length">
+          <template v-for="(grp, gIdx) in groupedOptions" :key="grp.group">
+            <div class="mention-group-label">{{ grp.group }}</div>
             <button
-              v-for="(opt, oi) in group.options"
-              :key="group.group + '-' + opt.value"
+              v-for="(opt, oIdx) in grp.options"
+              :key="grp.group + '-' + opt.value"
               type="button"
-              :class="['mention-option', { highlighted: flatIndex(gi, oi) === highlightIdx }]"
+              :class="['mention-option', { highlighted: offsetOf(gIdx, oIdx) === highlightIdx }]"
               @mousedown.prevent="pick(opt)"
-              @mousemove="highlightIdx = flatIndex(gi, oi)"
+              @mousemove="highlightIdx = offsetOf(gIdx, oIdx)"
             >
-              <span :class="['mention-avatar', `mention-avatar-${opt.group === '场景' ? 'scene' : (opt.group === '道具' ? 'prop' : 'role')}`]">
+              <span :class="['mention-avatar', avatarClass(opt.group)]">
                 <img v-if="opt.image" :src="opt.image" alt="" @error="$event.target.style.display = 'none'" />
                 <component v-else :is="groupIcon(opt.group)" :size="12" :stroke-width="2" />
               </span>
@@ -63,18 +67,15 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { User, MapPin, Package } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { MapPin, Package, User } from 'lucide-vue-next'
 import {
-  renderHighlightedHtml,
   detectActiveMention,
-  mentionBeforeCaret,
-  mentionAfterCaret,
   getCaretCoordinates,
+  mentionAfterCaret,
+  mentionBeforeCaret,
+  renderHighlightedHtml,
 } from '~/composables/useMentionTextarea'
-
-// 无图资产在下拉中显示分组图标兜底（场景=定位、道具=包裹、角色=人物）
-const groupIcon = (group) => (group === '场景' ? MapPin : group === '道具' ? Package : User)
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -86,15 +87,29 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'commit'])
 
+const DROPDOWN_WIDTH = 240
+const DROPDOWN_MAX_HEIGHT = 220
+
+// 无图资产兜底图标：场景=定位、道具=包裹、其余按角色
+const groupIcon = group => (group === '场景' ? MapPin : group === '道具' ? Package : User)
+const avatarClass = group =>
+  `mention-avatar-${group === '场景' ? 'scene' : group === '道具' ? 'prop' : 'role'}`
+
 const wrapEl = ref(null)
 const taEl = ref(null)
 const backdropEl = ref(null)
-const text = ref(props.modelValue)
-const mention = ref({ open: false, start: 0, query: '', top: 0, left: 0 })
-const highlightIdx = ref(0)
 const dropdownEl = ref(null)
+const text = ref(props.modelValue)
+const highlightIdx = ref(0)
+const mention = ref({ open: false, start: 0, query: '', top: 0, left: 0 })
 
-// 键盘上下移动高亮时，让高亮项自动滚动进下拉可视区（鼠标 mousemove 触发的跳转也保持可见）
+// 外部改写 modelValue 时同步文本并收起下拉
+watch(() => props.modelValue, v => {
+  if (v !== text.value) text.value = v
+  mention.value.open = false
+})
+
+// 高亮项变化（键盘或鼠标）后滚进下拉可视区
 watch(highlightIdx, () => {
   nextTick(() => {
     dropdownEl.value
@@ -103,10 +118,7 @@ watch(highlightIdx, () => {
   })
 })
 
-const DROPDOWN_WIDTH = 240
-const DROPDOWN_MAX_HEIGHT = 220
-
-// 下拉 Teleport 到 body 后用 fixed 定位，任何外层滚动/窗口变化都会使其错位 → 直接关闭
+// 下拉 Teleport 后是 fixed 定位，外层任何滚动/缩放都会错位 → 直接收起
 function closeOnOuterScroll(e) {
   if (mention.value.open && e?.target !== taEl.value) closeMention()
 }
@@ -119,23 +131,19 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', closeOnOuterScroll)
 })
 
-watch(() => props.modelValue, (v) => {
-  if (v !== text.value) text.value = v
-  mention.value.open = false
-})
-
-// 可引用名（按长度降序，保证最长匹配优先）及其分组样式
+// 全文出现过的引用名（长名在前，保证最长匹配优先）
 const mentionNames = computed(() => {
-  const seen = new Map()
+  const byName = new Map()
   for (const o of props.options) {
-    if (o.value && !seen.has(o.value)) seen.set(o.value, o.group === '场景' ? 'scene' : 'role')
+    if (o.value && !byName.has(o.value)) byName.set(o.value, o.group === '场景' ? 'scene' : 'role')
   }
-  return [...seen.entries()].sort((a, b) => b[0].length - a[0].length)
+  return [...byName.entries()].sort((a, b) => b[0].length - a[0].length)
 })
 
-// 镜像层高亮 HTML：@引用 包上分组色彩 span，其余文本原样
+// 镜像层 HTML：引用名套分组色彩 span，其他字符原样
 const highlightedHtml = computed(() => renderHighlightedHtml(text.value, mentionNames.value))
 
+// 查询串过滤（对 value 与 label 同时做子串匹配）
 const filteredOptions = computed(() => {
   const q = mention.value.query.trim().toLowerCase()
   if (!q) return props.options
@@ -144,53 +152,54 @@ const filteredOptions = computed(() => {
   )
 })
 
-const groupedFiltered = computed(() => {
-  const groups = []
+// 按 group 字段分桶（缺桶名归入「参考」）
+const groupedOptions = computed(() => {
+  const buckets = []
   for (const opt of filteredOptions.value) {
     const name = opt.group || '参考'
-    const g = groups.find(item => item.group === name)
-    if (g) g.options.push(opt)
-    else groups.push({ group: name, options: [opt] })
+    const hit = buckets.find(b => b.group === name)
+    if (hit) hit.options.push(opt)
+    else buckets.push({ group: name, options: [opt] })
   }
-  return groups
+  return buckets
 })
 
-const flatList = computed(() => groupedFiltered.value.flatMap(g => g.options))
+const flatList = computed(() => groupedOptions.value.flatMap(g => g.options))
 
-function flatIndex(gi, oi) {
+// 组内序号 → 展平列表下标
+function offsetOf(gIdx, oIdx) {
   let idx = 0
-  for (let g = 0; g < gi; g++) idx += groupedFiltered.value[g].options.length
-  return idx + oi
+  for (let g = 0; g < gIdx; g++) idx += groupedOptions.value[g].options.length
+  return idx + oIdx
 }
 
-// 下拉为 fixed 定位（Teleport 到 body），坐标基于视口；下方空间不足时翻到光标上方
+// fixed 坐标基于视口；下方放不下且上方更宽裕时翻到光标上沿
 const mentionStyle = computed(() => mention.value.above
   ? { left: `${mention.value.left}px`, bottom: `${window.innerHeight - mention.value.top}px` }
   : { left: `${mention.value.left}px`, top: `${mention.value.top}px` })
 
-function updateMentionState() {
-  const el = taEl.value
-  const active = el ? detectActiveMention(el.value, el.selectionStart) : null
+// 光标处正在输入的 @token 是否构成待弹状态
+function refreshMention() {
+  const ta = taEl.value
+  const active = ta ? detectActiveMention(ta.value, ta.selectionStart) : null
   if (!active) { mention.value.open = false; return }
-  // @后文本已精确等于某个完整引用名时不再弹列表（如删除引用尾部空格后光标落在完整引用上）
+  // 已完整命中某个引用名（如删掉尾随空格后光标停在引用末尾）→ 不再弹列表
   if (mentionNames.value.some(([name]) => name === active.query)) {
     mention.value.open = false
     return
   }
-  const ta = taEl.value
   const caret = getCaretCoordinates(ta, ta.selectionStart)
   const rect = ta.getBoundingClientRect()
   const maxLeft = Math.max(0, (wrapEl.value?.clientWidth || DROPDOWN_WIDTH) - DROPDOWN_WIDTH)
   const belowTop = rect.top + caret.top + caret.lineHeight - ta.scrollTop + 4
-  // 下方放不下时下拉翻到光标上方（top 记为光标行的视口上沿）
   const above = belowTop + DROPDOWN_MAX_HEIGHT > window.innerHeight - 8 && caret.top > DROPDOWN_MAX_HEIGHT
   mention.value = {
     open: true,
+    above,
     start: active.start,
     query: active.query,
     top: above ? rect.top + caret.top - ta.scrollTop - 4 : belowTop,
     left: rect.left + Math.min(caret.left, maxLeft),
-    above,
   }
   highlightIdx.value = 0
 }
@@ -199,6 +208,7 @@ function closeMention() {
   mention.value.open = false
 }
 
+// 程序化改文本：直写 textarea 原生值以保住光标控制，再回灌 v-model 与 commit
 function setText(next, caret) {
   const ta = taEl.value
   if (ta) {
@@ -215,9 +225,10 @@ function setText(next, caret) {
 function onInput(e) {
   text.value = e.target.value
   emit('update:modelValue', e.target.value)
-  updateMentionState()
+  refreshMention()
 }
 
+// 镜像层跟随 textarea 滚动；正文滚动会使 fixed 下拉错位 → 顺带收起
 function onScroll() {
   if (backdropEl.value && taEl.value) {
     backdropEl.value.scrollTop = taEl.value.scrollTop
@@ -228,15 +239,15 @@ function onScroll() {
 
 function onKeydown(e) {
   const ta = taEl.value
-  // @引用整体删除：光标在完整引用后按退格 / 在完整引用前按 Delete，整段一次删除
-  if (ta && (e.key === 'Backspace' || e.key === 'Delete') && ta.selectionStart === ta.selectionEnd) {
+  // 引用整体删除：光标紧贴完整引用尾/首时，退格/Delete 一次吃掉整段 @名称
+  const atCaret = ta && e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && ta.selectionStart === ta.selectionEnd
+  if (atCaret && (e.key === 'Backspace' || e.key === 'Delete')) {
     const hit = e.key === 'Backspace'
       ? mentionBeforeCaret(ta.value, ta.selectionStart, mentionNames.value)
       : mentionAfterCaret(ta.value, ta.selectionStart, mentionNames.value)
     if (hit) {
       e.preventDefault()
-      const next = ta.value.slice(0, hit.start) + ta.value.slice(hit.end)
-      setText(next, hit.start)
+      setText(ta.value.slice(0, hit.start) + ta.value.slice(hit.end), hit.start)
       return
     }
   }
@@ -259,14 +270,13 @@ function onKeydown(e) {
   }
 }
 
+// 选中下拉项：把 @token 替换成 `@名称 ` 并把光标放到插入尾部
 function pick(opt) {
   const ta = taEl.value
   if (!ta) return
-  const pos = ta.selectionStart
   const before = ta.value.slice(0, mention.value.start)
-  const after = ta.value.slice(pos)
   const insert = `@${opt.value} `
-  const next = before + insert + after
+  const next = before + insert + ta.value.slice(ta.selectionStart)
   setText(next, before.length + insert.length)
 }
 

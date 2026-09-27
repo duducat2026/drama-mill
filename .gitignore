@@ -1,34 +1,26 @@
-# Dependencies
+# Drama Mill 根忽略规则
+
+# 依赖与构建产物
 node_modules/
-
-# Build output
 dist/
+backend/dist
+frontend/.nuxt/
+frontend/.output/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# 环境配置：仅公开示例，排除本机、生产与历史副本
+# 环境与凭据：示例文件公开，真实配置一律不入库
 .env
 .env.*
 !.env.example
-
-# Logs
-*.log
-logs/
-
-# 敏感文件（数据库密码等临时文件）
 .dbpass.tmp
 .rescue-historical.sh
+configs/config.yaml
+*.pem
+*.key
+*.p12
+*.pfx
 
-# 数据库备份与 IDE 本地配置（不入库）
+# 备份与历史归档（不论存放位置）
 backups/
-.qoder/
-
-# 历史归档与密钥（不论存放位置均不入库）
 *.bundle
 *.sql.gz
 *.dump
@@ -36,43 +28,40 @@ backups/
 *.bak.*
 *.backup
 *.backup.*
-*.pem
-*.key
-*.p12
-*.pfx
+data/*.bak*
+data/public.sql
 
-# 小说素材（本地/部署数据，不入库）
-/drama/
+# 运行时数据与素材（本机/部署数据）
+data/static/
+data/storage/
+data/drama_generator.db*
+data/drama_mill.db*
+drama/
+logs/
+*.log
+tmp/
+temp/
 
-# 构建产物软链
-backend/dist
+# Agent 工作区：skills 定义保持跟踪，其余产出忽略
+backend/workspace/*
+!backend/workspace/skills/
 
-# OS
+# IDE / 工具 / OS 杂项
+.idea/
+.vscode/
+.qoder/
+.superpowers/
+.claude/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
 
-# Data (database and uploaded files)
-data/drama_generator.db
-data/drama_generator.db-wal
-data/drama_generator.db-shm
-data/drama_mill.db
-data/drama_mill.db-wal
-data/drama_mill.db-shm
-data/public.sql
-data/*.bak*
-data/static/
-data/storage/
-
-# Config
-configs/config.yaml
-
-# Misc
-tmp/
-temp/
-.superpowers/
+# 代理说明文档（本地用，不发布）
 /CLAUDE.md
 /AGENTS.md
 
-# Agent workspace (skills 保持跟踪，其余产出忽略)
-backend/workspace/*
-!backend/workspace/skills/
+# 品牌清洗审计临时目录（勿入库/勿部署）
+.cleanroom-tmp/
+.dbpass.tmp

@@ -16,6 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 生成任务路由：提交(POST) / 轮询(GET :id) / 失败诊断(failure-detail) / 列表 / 重试 / 删除
+ * 列表把过滤条件下推到 SQL 并分页，不再全表拉取后内存筛；
+ * queue 与 cloud-queue 必须注册在 /:id 之前（Hono 按注册顺序匹配参数路由）
+ */
 import { Hono } from 'hono'
 import { eq, and, isNull, inArray, or, sql, desc } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
@@ -36,6 +41,31 @@ import { handleCloudQueue } from './tasks-cloud-queue.js'
 
 const app = new Hono()
 
+/** 多模态参考视频的入参闸门：素材数量上限 + 各模式必填项 */
+function checkVideoReferenceLimits(body: any): string | null {
+  const refImages = body.reference_image_urls?.length || 0
+  const refVideos = body.reference_video_urls?.length || 0
+  const refAudios = body.reference_audio_urls?.length || 0
+  if (refImages > 9 || refVideos > 3 || refAudios > 3) return '参考素材超限：图片≤9、视频≤3、音频≤3'
+  if (refAudios > 0 && refImages + refVideos === 0) return '参考音频需要至少 1 个参考图片或视频'
+  if (refImages + refVideos + refAudios === 0 && !body.prompt) return '多模态参考模式需要至少一个参考素材或 prompt'
+  return null
+}
+
+/** 分镜所属集若锁定了生成配置/分辨率，优先于请求体里的值 */
+async function resolveEpisodeOverrides(type: TaskType, storyboardId: any) {
+  if (!storyboardId) return { configId: undefined as number | undefined, resolution: undefined as string | undefined }
+  const [sb] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(storyboardId)))
+  if (!sb) return { configId: undefined, resolution: undefined }
+  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId))
+  let configId: number | undefined
+  let episodeResolution: string | undefined
+  const locked = type === 'image' ? ep?.imageConfigId : ep?.videoConfigId
+  if (locked != null) configId = locked
+  if (type === 'video' && ep?.resolution) episodeResolution = ep.resolution
+  return { configId, resolution: episodeResolution }
+}
+
 // POST /tasks — 发起生成任务（body.type: image | video）
 app.post('/', async (c) => {
   const user = c.get('user')
@@ -50,42 +80,16 @@ app.post('/', async (c) => {
   if (type === 'image') {
     if (!body.prompt) return badRequest(c, 'prompt is required')
   } else {
-    // 视频生成只保留多模态参考：校验素材上限与必填项
-    const imgs = body.reference_image_urls?.length || 0
-    const vids = body.reference_video_urls?.length || 0
-    const auds = body.reference_audio_urls?.length || 0
-    if (imgs > 9 || vids > 3 || auds > 3) {
-      return badRequest(c, '参考素材超限：图片≤9、视频≤3、音频≤3')
-    }
-    if (auds > 0 && imgs + vids === 0) {
-      return badRequest(c, '参考音频需要至少 1 个参考图片或视频')
-    }
-    if (imgs + vids + auds === 0 && !body.prompt) {
-      return badRequest(c, '多模态参考模式需要至少一个参考素材或 prompt')
-    }
+    const violation = checkVideoReferenceLimits(body)
+    if (violation) return badRequest(c, violation)
   }
 
   try {
-    // 集锁定的生成配置优先于请求指定；视频分辨率同样锁定到集
-    let configId: number | undefined = body.config_id
-    let episodeResolution: string | undefined
-    if (body.storyboard_id) {
-      const [sb] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(body.storyboard_id)))
-      if (sb) {
-        const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId))
-        const locked = type === 'image' ? ep?.imageConfigId : ep?.videoConfigId
-        if (locked != null) configId = locked
-        if (type === 'video' && ep?.resolution) episodeResolution = ep.resolution
-      }
-    }
+    const overrides = await resolveEpisodeOverrides(type, body.storyboard_id)
+    const configId = overrides.configId ?? body.config_id
+    const episodeResolution = overrides.resolution
 
-    logTaskStart('TaskAPI', 'generate', {
-      type,
-      storyboardId: body.storyboard_id,
-      sceneId: body.scene_id,
-      characterId: body.character_id,
-      dramaId: body.drama_id,
-    })
+    logTaskStart('TaskAPI', 'generate', { type, dramaId: body.drama_id, characterId: body.character_id, sceneId: body.scene_id, storyboardId: body.storyboard_id })
     logTaskPayload('TaskAPI', 'request body', body)
 
     const id = type === 'image'
@@ -130,14 +134,13 @@ app.post('/', async (c) => {
   }
 })
 
-// GET /tasks/queue — 并发队列状态（执行中/排队中/上限），需注册在 /:id 之前
+// GET /tasks/queue — 本机并发队列状态（执行中/排队中/上限）
 app.get('/queue', (c) => success(c, getTaskQueueStats()))
 
-// GET /tasks/cloud-queue?model= — 用户侧云端排队状态（委托 tasks-cloud-queue 处理），
-// 须注册在 /:id 之前，避免被参数路由截胡（Hono 按注册顺序匹配）
+// GET /tasks/cloud-queue?model= — 上游云端排队状态，委托 tasks-cloud-queue
 app.get('/cloud-queue', handleCloudQueue)
 
-// GET /tasks/:id — 轮询任务状态
+// GET /tasks/:id — 前端轮询单任务状态
 app.get('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
@@ -145,9 +148,9 @@ app.get('/:id', async (c) => {
   return success(c, row || null)
 })
 
-// GET /tasks/:id/failure-detail — 失败原因诊断：把落库的 error_msg（可能是上游 HTML / JSON / 空串）
-// 归一为「结论 + 修复建议 + 原始返回」，并附上本次调用实际使用的配置上下文（密钥只回掩码，不给明文）。
-// 与 GET /tasks/:id 分开：轮询走轻字段，诊断是点开失败时才发的一次性请求。
+// GET /tasks/:id/failure-detail — 点开失败任务才发的一次性诊断请求：
+// 把库里的 error_msg（上游 HTML/JSON/空串都可能出现）归一为结论+建议+原文，
+// 并附本次调用实际用的配置上下文；密钥只回掩码
 app.get('/:id/failure-detail', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
@@ -179,8 +182,8 @@ app.get('/:id/failure-detail', async (c) => {
   })
 })
 
-// GET /tasks — 按 type / storyboard_id / drama_id / status 过滤（仅当前用户项目的任务），WHERE 下推 + 分页；
-// 响应 { items, pagination }；列表裁列剔除 params 大文本（保留 prompt 供任务抽屉展示）
+// GET /tasks — type / storyboard_id / drama_id / status 过滤 + SQL 下推 + 分页
+// 响应 { items, pagination }；裁列去掉 params 大文本，prompt 保留（任务抽屉要看）
 app.get('/', async (c) => {
   const user = c.get('user')
   const type = c.req.query('type')
@@ -222,19 +225,19 @@ app.get('/', async (c) => {
   const rows = await db.select({
     id: schema.sysTask.id,
     type: schema.sysTask.type,
-    storyboardId: schema.sysTask.storyboardId,
+    status: schema.sysTask.status,
+    errorMsg: schema.sysTask.errorMsg,
+    prompt: schema.sysTask.prompt,
+    model: schema.sysTask.model,
+    provider: schema.sysTask.provider,
+    resultUrl: schema.sysTask.resultUrl,
+    localPath: schema.sysTask.localPath,
+    taskId: schema.sysTask.taskId,
     dramaId: schema.sysTask.dramaId,
+    storyboardId: schema.sysTask.storyboardId,
     sceneId: schema.sysTask.sceneId,
     characterId: schema.sysTask.characterId,
     propId: schema.sysTask.propId,
-    provider: schema.sysTask.provider,
-    prompt: schema.sysTask.prompt,
-    model: schema.sysTask.model,
-    taskId: schema.sysTask.taskId,
-    resultUrl: schema.sysTask.resultUrl,
-    localPath: schema.sysTask.localPath,
-    status: schema.sysTask.status,
-    errorMsg: schema.sysTask.errorMsg,
     retryCount: schema.sysTask.retryCount,
     userId: schema.sysTask.userId,
     createdAt: schema.sysTask.createdAt,
@@ -272,7 +275,7 @@ app.post('/:id/retry', async (c) => {
   }
 })
 
-// DELETE /tasks/:id
+// DELETE /tasks/:id — 删任务行（归属校验后物理删）
 app.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))

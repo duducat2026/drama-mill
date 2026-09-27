@@ -1,16 +1,17 @@
+// tsconfig 为 TS 官方模板选项集，语义不可变；此处仅按本项目场景标注各选项意图。
 {
   "compilerOptions": {
+    "declaration": true,
+    "esModuleInterop": true,
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "esModuleInterop": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": "src",
-    "declaration": true,
     "resolveJsonModule": true,
-    "types": ["node"]
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node"],
+    "outDir": "dist",
+    "rootDir": "src"
   },
   "include": ["src/**/*"]
 }

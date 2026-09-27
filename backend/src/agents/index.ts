@@ -17,10 +17,11 @@
  */
 
 /**
- * Mastra Agent 注册表：
- * - 默认指令集 & 有效类型：agents/prompts-defaults.ts
- * - 模型工厂与 fetch 补丁（关思考 / temperature / max_tokens）：agents/model-factory.ts
- * - 具体工具集在 agents/tools/*.ts
+ * Mastra Agent 装配台。职责有三：
+ * 1. 给每种 agent type 配一份工具集（tools/* 导出）；
+ * 2. 每次请求动态拼 instructions（磁盘 prompt 覆盖代码默认 + SKILL 全文）；
+ * 3. 每次请求动态解析 model（frontmatter 指定 + RequestContext 覆盖链）。
+ * 指令兜底文本在 prompts-defaults.ts，模型解析在 model-factory.ts。
  */
 import { Agent } from '@mastra/core/agent'
 import type { RequestContext } from '@mastra/core/request-context'
@@ -36,62 +37,65 @@ import { getModel } from './model-factory.js'
 export { DEFAULT_PROMPTS, validAgentTypes } from './prompts-defaults.js'
 export { getModel, createTextModel } from './model-factory.js'
 
+/** 提示词 Agent 额外借用分镜工具读写 video_prompt */
+const promptGeneratorTools = {
+  ...imagePromptTools,
+  readStoryboardContext: storyboardTools.readStoryboardContext,
+  updateStoryboard: storyboardTools.updateStoryboard,
+}
+
 const AGENT_TOOLS: Record<string, Record<string, any>> = {
   script_rewriter: scriptTools,
   extractor: extractTools,
   storyboard_breaker: storyboardTools,
-  prompt_generator: {
-    ...imagePromptTools,
-    readStoryboardContext: storyboardTools.readStoryboardContext,
-    updateStoryboard: storyboardTools.updateStoryboard,
-  },
+  prompt_generator: promptGeneratorTools,
 }
 
 /**
- * instructions 按请求组装：prompt 文件（workspace/prompts/<type>.md，缺失回退代码默认）+ 技能全文拼接
- * 导出供非注册链路复用（小说拆分在 services/novel-split.ts 内按请求 new Agent）
+ * 组装某个 Agent 的完整 instructions：
+ * 基线取 workspace/prompts/<type>.md，缺文件则回落 DEFAULT_PROMPTS；
+ * 再把该 Agent 的技能全文拼在尾部。
+ * novel-split 服务（非注册链路）也复用此函数按请求 new Agent。
  */
 export async function buildAgentInstructions(type: string) {
-  const defaults = DEFAULT_PROMPTS[type]
-  if (!defaults) return ''
-  const promptFile = await loadAgentPromptFile(type)
-  const baseInstructions = promptFile?.instructions || defaults.instructions
-  const skillInstructions = await loadAgentSkills(type)
-  return skillInstructions
-    ? [baseInstructions, '', skillInstructions].join('\n')
-    : baseInstructions
+  const fallback = DEFAULT_PROMPTS[type]
+  if (!fallback) return ''
+  const fromDisk = await loadAgentPromptFile(type)
+  const baseline = fromDisk?.instructions || fallback.instructions
+  const skills = await loadAgentSkills(type)
+  return skills ? `${baseline}\n\n${skills}` : baseline
 }
 
-/** model 按请求解析：prompt 文件 frontmatter + RequestContext 的 modelOverride/textConfigId 覆盖 */
+/** 模型解析器：frontmatter model → modelOverride → textConfigId，逐级覆盖 */
 function buildModel(type: string) {
   return async ({ requestContext }: { requestContext?: RequestContext }) => {
-    const promptFile = await loadAgentPromptFile(type)
-    const modelOverride = requestContext?.get('modelOverride' as never) as string | undefined
-    const textConfigId = requestContext?.get('textConfigId' as never) as number | undefined
-    const userId = requestContext?.get('userId' as never) as number | undefined
-    return getModel(promptFile?.model || undefined, modelOverride, textConfigId, userId ?? null)
+    const fromDisk = await loadAgentPromptFile(type)
+    const pick = (key: string) => requestContext?.get(key as never) as number | string | undefined
+    return getModel(
+      fromDisk?.model || undefined,
+      pick('modelOverride') as string | undefined,
+      pick('textConfigId') as number | undefined,
+      (pick('userId') as number | undefined) ?? null,
+    )
   }
 }
 
 /**
- * 不挂 workspace 的 Agent：Mastra 会把 workspace 的 filesystem 工具自动注入 Agent，
- * 这类 Agent 的职责是单步产出结构化文本（无工具），注入工具会诱导模型去读文件而不是直接输出，
- * 技能规范仍生效——由 buildAgentInstructions 把 SKILL.md 全文拼进 instructions
+ * novel_splitter 故意不挂 workspace：Mastra 会把 workspace 自带的 filesystem
+ * 工具注入 Agent，而它的职责是单步直出结构化文本——多一套读文件工具反而诱导
+ * 模型去翻文件。技能约束不丢，由 buildAgentInstructions 拼全文兜住。
  */
 const NO_WORKSPACE_AGENTS = new Set(['novel_splitter'])
 
-/** 启动时注册的静态 Agent 表（供 Mastra 实例挂载） */
+/** 静态注册表：启动时按 validAgentTypes 全量建好，交给 Mastra 实例挂载 */
 export const agentRegistry: Record<string, Agent> = Object.fromEntries(
-  validAgentTypes.map(type => [
-    type,
-    new Agent({
-      id: type,
-      name: DEFAULT_PROMPTS[type].name,
-      instructions: () => buildAgentInstructions(type),
-      model: buildModel(type),
-      tools: AGENT_TOOLS[type],
-      workspace: NO_WORKSPACE_AGENTS.has(type) ? undefined : skillWorkspaces[type],
-      skillsFormat: 'markdown',
-    }),
-  ]),
+  validAgentTypes.map(type => [type, new Agent({
+    id: type,
+    name: DEFAULT_PROMPTS[type].name,
+    instructions: () => buildAgentInstructions(type),
+    model: buildModel(type),
+    tools: AGENT_TOOLS[type],
+    workspace: NO_WORKSPACE_AGENTS.has(type) ? undefined : skillWorkspaces[type],
+    skillsFormat: 'markdown',
+  })]),
 )

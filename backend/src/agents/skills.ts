@@ -17,26 +17,27 @@
  */
 
 /**
- * Agent 工作区（Workspace）— Mastra 原生能力
- * 每个 Agent 一个 Workspace：
- * - filesystem：jail 到 backend/workspace/ 目录，Agent 获得文件读写工具
- * - skills：从 workspace/skills/ 下注册各 Agent 专属的 SKILL.md
- * 注入 instructions 时仍拼接技能全文（原生注入只有元数据，全文注入保证行为一致）
+ * Agent 工作区装配（Mastra Workspace 原语）。
+ *
+ * 约定：backend/workspace/ 是所有 Agent 的文件系统 jail 根；技能 markdown 放
+ * 在 skills 目录树的各层级（目录内含 SKILL.md 即算一个技能）。每种 agent type
+ * 一个 Workspace 实例，
+ * skills 走目录前缀的动态解析器——设置页新建技能目录后无需重启即可被感知。
+ * instructions 注入时拼接 SKILL 全文（原生注入只有元数据列表，全文注入才行为稳定）。
  */
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { Workspace, LocalFilesystem } from '@mastra/core/workspace'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const WORKSPACE_DIR = path.resolve(__dirname, '../../workspace')
-const SKILLS_DIR = path.join(WORKSPACE_DIR, 'skills')
+const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+const WORKSPACE_DIR = path.resolve(moduleDir, '../../workspace')
+export const SKILLS_ROOT = path.join(WORKSPACE_DIR, 'skills')
 
-// 启动时确保工作目录存在（Agent 文件读写的 jail 根）
-fs.mkdirSync(SKILLS_DIR, { recursive: true })
+// jail 根必须存在，否则 LocalFilesystem 初始化即炸
+fs.mkdirSync(SKILLS_ROOT, { recursive: true })
 
-/** 每个 Agent 注册的 skill 目录（相对 workspace/skills/，含子规范目录；目录名需符合 Agent Skills 规范：小写+连字符） */
+/** agent type → 技能目录前缀（相对 skills/；目录名遵循小写+连字符的 Agent Skills 规范） */
 const AGENT_SKILL_MAP: Record<string, string[]> = {
   script_rewriter: ['script-rewriter'],
   extractor: ['extractor'],
@@ -47,46 +48,42 @@ const AGENT_SKILL_MAP: Record<string, string[]> = {
     'prompt-generator/prop-prompt',
     'prompt-generator/video-prompt',
   ],
-  // 小说自动分集：为拆分出的每一集生成标题/概要的命名规范
+  // 小说自动分集的命名/概要规范
   novel_splitter: ['novel-splitter'],
 }
 
-/** 每个 Agent 的 Workspace（filesystem 工作目录 + 原生技能注册）
- *  skills 用动态解析器按目录前缀匹配：设置页新建的子技能无需重启即可被发现 */
-export const skillWorkspaces: Record<string, Workspace> = Object.fromEntries(
-  Object.entries(AGENT_SKILL_MAP).map(([agentType, prefixes]) => [
-    agentType,
-    new Workspace({
-      id: `workspace-${agentType}`,
-      name: `${agentType} workspace`,
-      filesystem: new LocalFilesystem({ basePath: WORKSPACE_DIR }),
-      skills: () => scanSkillPaths().filter(p =>
-        prefixes.some(prefix => p === `skills/${prefix}` || p.startsWith(`skills/${prefix}/`))),
-    }),
-  ]),
-)
-
-/** 递归扫描 workspace/skills/ 下所有含 SKILL.md 的目录（相对 workspace 根的路径） */
+/** 深度遍历 skills/，收集一切放着 SKILL.md 的目录（返回 `skills/<相对路径>`） */
 function scanSkillPaths(): string[] {
-  const found: string[] = []
-  const walk = (dir: string, prefix: string) => {
-    if (!fs.existsSync(dir)) return
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name
-      const full = path.join(dir, entry.name)
-      if (fs.existsSync(path.join(full, 'SKILL.md'))) found.push(`skills/${rel}`)
-      walk(full, rel)
+  const hitDirs: string[] = []
+  const dive = (absDir: string, relPrefix: string) => {
+    if (!fs.existsSync(absDir)) return
+    for (const ent of fs.readdirSync(absDir, { withFileTypes: true })) {
+      if (!ent.isDirectory()) continue
+      const rel = relPrefix ? `${relPrefix}/${ent.name}` : ent.name
+      const abs = path.join(absDir, ent.name)
+      if (fs.existsSync(path.join(abs, 'SKILL.md'))) hitDirs.push(`skills/${rel}`)
+      dive(abs, rel)
     }
   }
-  walk(SKILLS_DIR, '')
-  return found
+  dive(SKILLS_ROOT, '')
+  return hitDirs
 }
 
-/**
- * 技能管理 Workspace（设置页 CRUD 用）
- * skills 用动态解析器，新建/删除技能目录后无需重启即可发现
- */
+/** 前缀匹配：目录本身或其任意子层都算命中（设置页加子技能无需改代码） */
+const underPrefix = (relPath: string, prefixes: string[]) =>
+  prefixes.some(p => relPath === p || relPath.startsWith(`${p}/`))
+
+/** 每种 Agent 的 Workspace：同一 filesystem + 各自前缀过滤后的技能集 */
+export const skillWorkspaces: Record<string, Workspace> = Object.fromEntries(
+  Object.entries(AGENT_SKILL_MAP).map(([agentType, prefixes]) => [agentType, new Workspace({
+    id: `workspace-${agentType}`,
+    name: `${agentType} workspace`,
+    filesystem: new LocalFilesystem({ basePath: WORKSPACE_DIR }),
+    skills: () => scanSkillPaths().filter(p => underPrefix(p.replace(/^skills\//, ''), prefixes)),
+  })]),
+)
+
+/** 设置页技能 CRUD 专用的管理 Workspace（不加前缀过滤，看得到全部技能） */
 export const skillsManagerWorkspace = new Workspace({
   id: 'workspace-skills-manager',
   name: 'skills manager',
@@ -94,61 +91,49 @@ export const skillsManagerWorkspace = new Workspace({
   skills: () => scanSkillPaths(),
 })
 
-function formatSkillSection(skillId: string, content: string): string {
-  return [`## Skill: ${skillId}`, content].join('\n')
-}
-
-export const SKILLS_ROOT = SKILLS_DIR
-
 /**
- * 技能根目录是否缺失（部署未同步 backend/workspace/skills 时为 true）。
- * 用于 GET /skills 区分「环境未部署技能」与「确无技能」，避免静默返回空数组掩盖问题。
+ * 技能根目录不存在 → true（多半是部署没同步 backend/workspace/skills）。
+ * GET /skills 借此把「环境缺目录」与「真的没有技能」分开报，不让空数组静默背锅。
  */
 export function skillsRootMissing(): boolean {
-  return !fs.existsSync(SKILLS_DIR)
+  return !fs.existsSync(SKILLS_ROOT)
 }
 
-/** 读取 Agent 专属技能全文（经 workspace.skills API，保持原注入格式）
- *  AGENT_SKILL_MAP 的目录按前缀匹配：目录自身及其子目录下所有 SKILL.md 都会注入，
- *  因此设置页新建的子技能（如 storyboard-breaker/xxx）无需改代码即可生效 */
+/**
+ * 拼出注入给某 Agent 的技能规范全文；无命中返回空串。
+ * 格式沿用固定样板：一句总则 + 每个技能一节「## Skill: <相对路径>」。
+ */
 export async function loadAgentSkills(agentType: string): Promise<string> {
   const workspace = skillWorkspaces[agentType]
-  const prefixes = AGENT_SKILL_MAP[agentType] || []
-  if (!workspace || !prefixes.length) return ''
+  const prefixes = AGENT_SKILL_MAP[agentType] ?? []
+  if (!workspace || prefixes.length === 0) return ''
 
-  const allPaths = scanSkillPaths().map(p => p.replace(/^skills\//, ''))
-  const relPaths = allPaths.filter(p =>
-    prefixes.some(prefix => p === prefix || p.startsWith(prefix + '/')))
-
-  const contents: string[] = []
-  for (const relPath of relPaths) {
-    const skill = await workspace.skills?.get(`skills/${relPath}`)
-    const body = skill?.instructions?.trim()
-    if (body) contents.push(formatSkillSection(relPath, body))
+  const sections: string[] = []
+  for (const rel of scanSkillPaths().map(p => p.replace(/^skills\//, '')).filter(p => underPrefix(p, prefixes))) {
+    const body = (await workspace.skills?.get(`skills/${rel}`))?.instructions?.trim()
+    if (body) sections.push(`## Skill: ${rel}\n${body}`)
   }
-
-  if (!contents.length) return ''
+  if (!sections.length) return ''
 
   return [
-    '以下是该 Agent 专属的项目技能规范（SKILL.md）。',
-    '不同 Agent 会加载不同 skill；你只需要遵守当前注入的这些技能。',
-    '你必须在不违背当前工具边界的前提下优先遵守这些规范；若与用户明确要求冲突，以用户要求为准。',
+    '以下为当前 Agent 装载的项目技能规范（SKILL.md 全文）。',
+    '不同 Agent 装载的技能不同，你只需遵循眼前注入的这些技能。',
+    '在不超出当前工具边界的前提下优先服从这些规范；与用户明确要求冲突时，以用户要求为准。',
     '',
-    contents.join('\n\n'),
+    sections.join('\n\n'),
   ].join('\n')
 }
 
 /**
- * 强制重新扫描全部 Agent 的技能（SKILL.md 编辑后调用）
- * maybeRefresh 负责感知目录增删（动态 resolver 路径变化），refresh 负责内容更新
- * （目录 mtime 不会因文件内容编辑而更新，单靠 maybeRefresh 的 staleness 检查不可靠）
+ * SKILL.md 被编辑后强制全量重扫。
+ * 两段都要：maybeRefresh 只盯目录增删（动态 resolver 路径变化），
+ * 而改文件内容不动目录 mtime，staleness 检查会漏，必须再显式 refresh。
  */
 export async function refreshSkillWorkspaces(): Promise<void> {
   await Promise.all(
-    [...Object.values(skillWorkspaces), skillsManagerWorkspace]
-      .map(async workspace => {
-        await workspace.skills?.maybeRefresh()
-        await workspace.skills?.refresh()
-      }),
+    [...Object.values(skillWorkspaces), skillsManagerWorkspace].map(async ws => {
+      await ws.skills?.maybeRefresh()
+      await ws.skills?.refresh()
+    }),
   )
 }

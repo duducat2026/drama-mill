@@ -19,24 +19,34 @@
 import { toast } from 'vue-sonner'
 import { api } from './useApi'
 
+// Agent 聊天状态追踪 + 单次调用封装
+// 并发安全：同一时刻仅允许一个 Agent 任务进行中
 export function useAgent() {
   const running = ref(false)
   const runningType = ref<string | null>(null)
 
-  async function run(type: string, msg: string, dramaId: number, episodeId: number, onDone?: () => void, model?: string, configId?: number) {
+  async function run(
+    agentKind: string,
+    prompt: string,
+    projectId: number,
+    episodeNo: number,
+    onFinish?: () => void,
+    model?: string,
+    configId?: number,
+  ) {
     if (running.value) { toast.warning('操作执行中'); return }
     running.value = true
-    runningType.value = type
+    runningType.value = agentKind
     try {
-      const data = await api.post<any>(`/agent/${type}/chat`, {
-        message: msg,
-        drama_id: dramaId,
-        episode_id: episodeId,
+      await api.post<any>(`/agent/${agentKind}/chat`, {
+        message: prompt,
+        drama_id: projectId,
+        episode_id: episodeNo,
         model: model || undefined,
         config_id: configId || undefined,
       })
       toast.success('完成')
-      onDone?.()
+      onFinish?.()
     } catch (err: any) {
       toast.error(err.message)
     } finally {

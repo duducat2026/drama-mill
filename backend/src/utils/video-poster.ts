@@ -17,35 +17,35 @@
  */
 
 /**
- * 视频海报帧提取 — 供 <video poster> 使用，避免列表页为显示首帧而缓冲整个视频
+ * 成片/镜头视频海报帧抽图
+ * 列表页 <video poster> 直接吃这张静态图，省掉为首帧缓冲整条视频的开销。
  */
 import { getAbsolutePath } from './storage.js'
 import { runFfmpeg, checkFfmpegSuite } from './ffmpeg.js'
 
-/** 由视频相对路径推导海报帧路径：static/videos/x.mp4 → static/videos/x_poster.jpg */
+/** 海报帧落点与原视频同目录，仅换后缀：.mp4 → _poster.jpg */
 export function posterPathFor(relativePath: string): string {
   return relativePath.replace(/\.[^./]+$/, '_poster.jpg')
 }
 
 /**
- * 抽取视频 0.5s 处画面作为海报帧（宽 640，等比缩放，与原视频同目录）。
- * 失败返回 null，不阻断主流程。
+ * 抽 0.5s 处的一帧（宽 640、高度按比例）作海报图。
+ * 二进制不可用或抽帧失败都只警告并返回 null——封面缺失不阻断生成主流程。
  */
 export async function extractVideoPoster(relativePath: string): Promise<string | null> {
   try {
-    // ffmpeg 二进制损坏（跨平台拷贝 node_modules / 下载不完整）时静默跳过；
-    // 海报帧用 runFfmpeg 直接 spawn，绕开 fluent-ffmpeg 在 Node ≥22 的进程级崩溃路径，
-    // 失败只影响封面展示，不阻断主流程（外层 catch 兜底返回 null）
-    const { ffmpeg: ffmpegOk } = await checkFfmpegSuite()
-    if (!ffmpegOk) return null
+    // 先探测内置二进制（跨平台拷贝 node_modules / 下载残缺时直接跳过）；
+    // 抽帧走 runFfmpeg 直接 spawn，不碰 fluent-ffmpeg（Node ≥22 有进程级崩溃路径）
+    const suite = await checkFfmpegSuite()
+    if (!suite.ffmpeg) return null
 
     const posterRel = posterPathFor(relativePath)
-    const posterAbs = getAbsolutePath(posterRel)
-    await runFfmpeg([
+    const args = [
       '-y', '-ss', '0.5', '-i', getAbsolutePath(relativePath),
       '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '3',
-      posterAbs,
-    ], 60_000)
+      getAbsolutePath(posterRel),
+    ]
+    await runFfmpeg(args, 60_000)
     return posterRel
   } catch (err) {
     console.warn(`[video-poster] 海报帧提取失败 ${relativePath}:`, (err as Error).message)

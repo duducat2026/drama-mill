@@ -17,8 +17,11 @@
  */
 
 /**
- * Agent 请求上下文 — 通过 Mastra RequestContext 按请求注入
- * 路由层 build → generate({ requestContext }) → 工具 execute 内读取
+ * Agent 的运行期请求上下文桥。
+ *
+ * 工具集是模块级单例，不能持有会话态；本文件把「这一次调用属于哪部剧/哪一集、
+ * 用哪个模型配置」等信息装进 Mastra RequestContext，随 generate 调用透传，
+ * 工具 execute 里再用对应 getter 取回。
  */
 import { RequestContext } from '@mastra/core/request-context'
 
@@ -30,27 +33,29 @@ export interface AgentRequestContextValues {
   userId?: number
 }
 
+/** 路由层入口：把调用参数打包成 RequestContext（空值一律不写入） */
 export function buildAgentRequestContext(values: AgentRequestContextValues): RequestContext<AgentRequestContextValues> {
   const rc = new RequestContext<AgentRequestContextValues>()
-  rc.set('episodeId', values.episodeId)
-  rc.set('dramaId', values.dramaId)
-  if (values.modelOverride) rc.set('modelOverride', values.modelOverride)
-  if (values.textConfigId) rc.set('textConfigId', values.textConfigId)
-  if (values.userId) rc.set('userId', values.userId)
+  for (const [key, value] of Object.entries(values)) {
+    if (value) rc.set(key as never, value as never)
+  }
   return rc
 }
 
+/** 数值键读取：缺失或类型不符统一归 null，调用方自行判空 */
+function readNumeric(rc: RequestContext | undefined, key: string): number | null {
+  const raw = rc?.get(key as never)
+  return typeof raw === 'number' ? raw : null
+}
+
 export function getEpisodeId(requestContext: RequestContext | undefined): number | null {
-  const v = requestContext?.get('episodeId' as never)
-  return typeof v === 'number' ? v : null
+  return readNumeric(requestContext, 'episodeId')
 }
 
 export function getDramaId(requestContext: RequestContext | undefined): number | null {
-  const v = requestContext?.get('dramaId' as never)
-  return typeof v === 'number' ? v : null
+  return readNumeric(requestContext, 'dramaId')
 }
 
 export function getUserId(requestContext: RequestContext | undefined): number | null {
-  const v = requestContext?.get('userId' as never)
-  return typeof v === 'number' ? v : null
+  return readNumeric(requestContext, 'userId')
 }

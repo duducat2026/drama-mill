@@ -17,29 +17,38 @@
  */
 
 /**
- * 风格预设服务 — 将项目绑定的视觉风格解析为英文提示词片段
- * dramas.style 存 style_presets.value；多租户匹配优先项目属主的私有风格，
- * 找不到再回退系统内置（user_id NULL）；均查不到/已停用时返回空串（调用方走兜底）
+ * 风格预设解析服务
+ * 把项目（dramas.style 存的是 style_presets.value）翻译成一段英文风格提示词。
+ * 多租户下同名预设可能存在两份：先取项目属主自己的私有预设，再退到系统内置
+ * （user_id 为 NULL）；停用或查无此预设时返回 ''，由调用方走各自兜底。
  */
 import { and, desc, eq, isNull, or } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 
-/** 查询项目绑定的风格预设英文提示词片段；查不到返回 '' */
+/** 取项目绑定风格的英文提示词片段；项目、风格、预设任一缺失都返回 '' */
 export async function getDramaStylePrompt(dramaId: number | null | undefined): Promise<string> {
   if (!dramaId) return ''
   const [drama] = await db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId))
   if (!drama?.style) return ''
-  const scope = drama.userId
+
+  // 可见范围 = 属主私有 ∪ 系统内置；无属主的项目只能匹配系统内置
+  const visibleTo = drama.userId
     ? or(eq(schema.stylePresets.userId, drama.userId), isNull(schema.stylePresets.userId))
     : isNull(schema.stylePresets.userId)
-  // user_id DESC：非 NULL（私有）排在 NULL（内置）前，私有命中优先
-  const [preset] = await db.select().from(schema.stylePresets)
-    .where(and(
-      eq(schema.stylePresets.value, drama.style),
-      eq(schema.stylePresets.isActive, true),
-      scope,
-    ))
+
+  // orderBy userId DESC 让私有（非 NULL）压过同名内置（NULL），实现私有优先
+  const matches = await db
+    .select({ prompt: schema.stylePresets.prompt })
+    .from(schema.stylePresets)
+    .where(
+      and(
+        eq(schema.stylePresets.value, drama.style),
+        eq(schema.stylePresets.isActive, true),
+        visibleTo,
+      )
+    )
     .orderBy(desc(schema.stylePresets.userId))
     .limit(1)
-  return preset?.prompt || ''
+
+  return matches[0]?.prompt || ''
 }

@@ -1,4 +1,8 @@
 <!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
+<!--
   AdminNovelSplitTemplates.vue — 小说管理页（admin/novels.vue）「拆分提示词模版」标签，由超限文件拆分外提。
   自持模版检索/新建/编辑/删除与预览；作为独立标签在挂载时拉取模版列表。
 -->

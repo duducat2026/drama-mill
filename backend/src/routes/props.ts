@@ -16,6 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * 道具资产接口：建档、编辑、白底单品图生成（单/批）、最终提示词、软删
+ * 与场景同构；道具图强调白底单品，供分镜合成引用
+ */
 import { Hono } from 'hono'
 import { and, eq } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
@@ -28,7 +32,17 @@ import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger
 
 const app = new Hono()
 
-// POST /props — 手动新增道具（传入 episode_id 时关联到该集）
+/**
+ * 前端历史上有 snake_case / camelCase 两种提交形，这里统一收口：
+ * snake 优先，camel 兜底；只有显式出现才覆盖，避免 PUT 半量字段把库值冲掉
+ */
+function pickBodyField(body: any, snake: string, camel: string) {
+  if (body[snake] !== undefined) return body[snake]
+  if (body[camel] !== undefined) return body[camel]
+  return undefined
+}
+
+// POST /props — 手动建档；带 episode_id 就顺手挂到该集
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()
@@ -37,14 +51,15 @@ app.post('/', async (c) => {
   await getDramaOwned(Number(body.drama_id), user)
   const ts = now()
   const res = await db.insert(schema.props).values({
-    name: body.name.trim(),
-    type: body.type || '',
     description: body.description || '',
+    type: body.type || '',
+    name: body.name.trim(),
     dramaId: body.drama_id,
     createdAt: ts,
     updatedAt: ts,
   })
   const propId = getInsertId(res)
+  // 关联表先查再插，重复挂集不产生重复行
   if (body.episode_id) {
     const existing = await db.select().from(schema.episodeProps)
       .where(and(eq(schema.episodeProps.episodeId, Number(body.episode_id)), eq(schema.episodeProps.propId, propId)))
@@ -56,16 +71,7 @@ app.post('/', async (c) => {
   return created(c, toSnakeCase(row))
 })
 
-// DELETE /props/:id — 软删除
-app.delete('/:id', async (c) => {
-  const user = c.get('user')
-  const id = Number(c.req.param('id'))
-  await getPropOwned(id, user)
-  await db.update(schema.props).set({ deletedAt: now(), updatedAt: now() }).where(eq(schema.props.id, id))
-  return success(c)
-})
-
-// PUT /props/:id — 更新道具（物品外貌/类型/最终提示词）
+// PUT /props/:id — 外貌/类型/图/最终提示词，按传入字段增量更新
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
@@ -75,19 +81,27 @@ app.put('/:id', async (c) => {
   if (body.name !== undefined) updates.name = body.name
   if (body.type !== undefined) updates.type = body.type
   if (body.description !== undefined) updates.description = body.description
-  // 用户上传道具图：直接写入图片地址与本地路径
-  if (body.image_url !== undefined) updates.imageUrl = body.image_url
-  else if (body.imageUrl !== undefined) updates.imageUrl = body.imageUrl
-  if (body.local_path !== undefined) updates.localPath = body.local_path
-  else if (body.localPath !== undefined) updates.localPath = body.localPath
-  // 手动编辑最终提示词时以传入值为准；未传入则保留原值（修改信息时不再自动置空）
-  if (body.final_prompt !== undefined) updates.finalPrompt = body.final_prompt || null
-  else if (body.finalPrompt !== undefined) updates.finalPrompt = body.finalPrompt || null
+  // 用户上传现成道具图 / 手动改最终提示词：显式传才覆盖
+  const uploadedImage = pickBodyField(body, 'image_url', 'imageUrl')
+  if (uploadedImage !== undefined) updates.imageUrl = uploadedImage
+  const localPath = pickBodyField(body, 'local_path', 'localPath')
+  if (localPath !== undefined) updates.localPath = localPath
+  const finalPrompt = pickBodyField(body, 'final_prompt', 'finalPrompt')
+  if (finalPrompt !== undefined) updates.finalPrompt = finalPrompt || null
   await db.update(schema.props).set(updates).where(eq(schema.props.id, id))
   return success(c)
 })
 
-// POST /props/:id/generate-prompt — 独立生成/重新生成白底单品最终提示词（不生图）
+// DELETE /props/:id — 软删：打 deletedAt 戳，行留在库里
+app.delete('/:id', async (c) => {
+  const user = c.get('user')
+  const id = Number(c.req.param('id'))
+  await getPropOwned(id, user)
+  await db.update(schema.props).set({ deletedAt: now(), updatedAt: now() }).where(eq(schema.props.id, id))
+  return success(c)
+})
+
+// POST /props/:id/generate-prompt — 只重生成白底单品最终提示词，不动图
 app.post('/:id/generate-prompt', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
@@ -98,7 +112,7 @@ app.post('/:id/generate-prompt', async (c) => {
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, Number(body.episode_id)))
   if (!ep) return badRequest(c, 'Episode not found')
 
-  logTaskStart('FinalPrompt', 'prop-generate', { propId: id, episodeId: ep.id, force: !!body.force })
+  logTaskStart('FinalPrompt', 'prop-generate', { force: !!body.force, episodeId: ep.id, propId: id })
   const finalPrompt = await ensurePropFinalPrompt(prop, ep.id, !!body.force, { model: body.text_model, configId: body.text_config_id ?? undefined })
   if (!finalPrompt) {
     logTaskError('FinalPrompt', 'prop-generate', { propId: id, error: 'agent returned empty prompt' })
@@ -108,7 +122,7 @@ app.post('/:id/generate-prompt', async (c) => {
   return success(c, { final_prompt: finalPrompt })
 })
 
-// POST /props/:id/generate-image — 生成道具白底单品图
+// POST /props/:id/generate-image — 提交单个道具白底图生成任务
 app.post('/:id/generate-image', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
@@ -116,14 +130,14 @@ app.post('/:id/generate-image', async (c) => {
   if (!body.episode_id) return badRequest(c, 'episode_id is required')
   await getPropOwned(id, user)
   try {
-    logTaskStart('PropImage', 'generate', { propId: id, episodeId: Number(body.episode_id) })
+    logTaskStart('PropImage', 'generate', { episodeId: Number(body.episode_id), propId: id })
     const genId = await generatePropImageFor(id, Number(body.episode_id), {
       model: body.model,
       configId: body.config_id ?? undefined,
       textModel: body.text_model,
       textConfigId: body.text_config_id ?? undefined,
     })
-    logTaskSuccess('PropImage', 'generate', { propId: id, generationId: genId })
+    logTaskSuccess('PropImage', 'generate', { generationId: genId, propId: id })
     return success(c, { image_generation_id: genId })
   } catch (err: any) {
     logTaskError('PropImage', 'generate', { propId: id, error: err.message })
@@ -131,7 +145,7 @@ app.post('/:id/generate-image', async (c) => {
   }
 })
 
-// POST /props/batch-generate-images — 批量生成/重绘（传入选中的 prop_ids，不区分是否已有图）
+// POST /props/batch-generate-images — 按勾选集合批量提图，已有图的也允许重绘
 app.post('/batch-generate-images', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()

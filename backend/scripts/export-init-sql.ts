@@ -17,66 +17,69 @@
  */
 
 /**
- * 导出初始化 SQL — 把 src/db/mysql-schema.ts 中的内嵌 DDL/DML 生成为独立 init.sql
+ * init.sql 导出器：将 src/db/mysql-schema.ts 的内嵌 DDL/种子语句落为独立 SQL 文件
  *
- * 用法: npx tsx scripts/export-init-sql.ts [输出路径]
- * 默认输出: <repo>/docker/init.sql
- *
- * 说明:
- * - 应用启动时本就会自动执行同样的初始化(initMySqlSchema),该文件是可选产物,
- *   用于 DBA 审核、预建表或挂到 MySQL 容器的 /docker-entrypoint-initdb.d/
+ * 用法: npx tsx scripts/export-init-sql.ts [输出路径]（缺省 <repo>/docker/init.sql）
+ * 产物仅供 DBA 审核、外部预建表或挂进 MySQL 容器 initdb 目录；
+ * 应用启动时 initMySqlSchema 会执行同样的幂等初始化，部署并不依赖本文件
  */
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import {
-  mysqlSchemaStatements,
-  mysqlDataSeedStatements,
-} from '../src/db/mysql-schema.js'
+import { mysqlDataSeedStatements, mysqlSchemaStatements } from '../src/db/mysql-schema.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const outPath = path.resolve(process.argv[2] || path.join(__dirname, '../../docker/init.sql'))
+const here = path.dirname(fileURLToPath(import.meta.url))
+// 命令行第一参可覆盖输出路径；缺省写到仓库根的 docker/init.sql
+const target = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : path.join(here, '../../docker/init.sql')
 
-/** 把 ? 占位符内联为 SQL 字面量(导出静态文件,不走参数化) */
-function inlineParams(sql: string, params: unknown[]): string {
-  let i = 0
-  const inlined = sql.replace(/\?/g, () => {
-    const v = params[i++]
+/** 种子语句里的 ? 占位内联成 SQL 字面量（静态导出场景，不需要参数化） */
+function inlineParams(text: string, values: unknown[]): string {
+  let cursor = 0
+  const filled = text.replace(/\?/g, () => {
+    const v = values[cursor++]
     if (v === null || v === undefined) return 'NULL'
     if (typeof v === 'number') return String(v)
     return `'${String(v).replace(/'/g, "''")}'`
   })
-  if (i !== params.length) throw new Error(`参数数量与占位符不匹配: ${sql}`)
-  return inlined
+  if (cursor !== values.length) throw new Error(`参数数量与占位符不匹配: ${text}`)
+  return filled
 }
 
-const sections: string[] = []
+const bar = '-'.repeat(76)
+const pieces: string[] = []
 
-sections.push(`-- ============================================================================
--- Drama Mill 初始化 SQL
--- 由 backend/scripts/export-init-sql.ts 从 backend/src/db/mysql-schema.ts 生成
--- 生成时间: ${new Date().toISOString()}
---
--- 注意: 应用启动时会自动执行同等初始化(幂等),本文件不是部署必需,
---       仅供 DBA 审核或在应用外预建表使用
--- ============================================================================
+// 文件头：来源说明 + 生成时间戳
+pieces.push([
+  '='.repeat(76),
+  '-- Drama Mill 数据库初始化脚本（生成物，请勿手改）',
+  '-- 来源: backend/src/db/mysql-schema.ts',
+  '-- 导出: backend/scripts/export-init-sql.ts',
+  `-- 时间: ${new Date().toISOString()}`,
+  '-- 说明: 应用启动自带幂等初始化，本脚本仅用于审核/预建表',
+  '='.repeat(76),
+  '',
+  'SET NAMES utf8mb4;',
+].join('\n'))
 
-SET NAMES utf8mb4;
-`)
+// 建表段：DDL 逐条加分号空行分隔
+pieces.push([
+  bar,
+  `-- 建表语句（共 ${mysqlSchemaStatements.length} 张）`,
+  bar,
+  ...mysqlSchemaStatements.map(s => `${s};\n`),
+].join('\n'))
 
-sections.push(`-- ----------------------------------------------------------------------------
--- 1. 建表(${mysqlSchemaStatements.length} 张)
--- ----------------------------------------------------------------------------
-${mysqlSchemaStatements.map(s => `${s};`).join('\n\n')}
-`)
+// 种子段：风格预设，幂等补行
+pieces.push([
+  bar,
+  '-- 种子数据（风格预设，INSERT 只补缺失行）',
+  bar,
+  ...mysqlDataSeedStatements.map(s => `${inlineParams(s.sql, s.params)};`),
+].join('\n'))
 
-sections.push(`-- ----------------------------------------------------------------------------
--- 2. 种子数据: 风格预设(幂等,只补缺失行)
--- ----------------------------------------------------------------------------
-${mysqlDataSeedStatements.map(s => `${inlineParams(s.sql, s.params)};`).join('\n')}
-`)
-
-fs.mkdirSync(path.dirname(outPath), { recursive: true })
-fs.writeFileSync(outPath, sections.join('\n'), 'utf8')
-console.log(`✅ 已导出: ${outPath}`)
-console.log(`   建表 ${mysqlSchemaStatements.length} 条, 种子 ${mysqlDataSeedStatements.length} 条`)
+fs.mkdirSync(path.dirname(target), { recursive: true })
+fs.writeFileSync(target, pieces.join('\n') + '\n', 'utf8')
+console.log(`✅ 已导出: ${target}`)
+console.log(`   建表 ${mysqlSchemaStatements.length} 条 / 种子 ${mysqlDataSeedStatements.length} 条`)

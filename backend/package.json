@@ -1,24 +1,24 @@
 {
   "name": "drama-mill-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Drama Mill 后端：Hono HTTP + JWT 鉴权 + Drizzle/MySQL + Mastra Agent 生产流水线",
+  "type": "module",
   "main": "src/index.ts",
+  "author": "Drama Mill",
+  "license": "AGPL-3.0-only",
+  "keywords": ["drama-mill", "ai", "short-drama", "hono", "mastra", "drizzle"],
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test 'tests/*.test.mjs'",
+    "lint:lines": "tsx scripts/check-file-lines.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "typecheck": "tsc --noEmit",
-    "lint:lines": "tsx scripts/check-file-lines.ts",
-    "test": "node --import tsx --test 'tests/*.test.mjs'",
     "backfill-artwork": "tsx scripts/backfill-artwork.ts",
     "dedupe-image-tasks": "tsx scripts/dedupe-active-image-tasks.ts"
   },
-  "keywords": [],
-  "author": "Drama Mill",
-  "license": "AGPL-3.0-only",
-  "type": "module",
   "dependencies": {
     "@ai-sdk/google": "^3.0.53",
     "@ai-sdk/openai": "^3.0.48",
@@ -49,9 +49,6 @@
     "typescript": "^6.0.2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "ffmpeg-static",
-      "ffprobe-static"
-    ]
+    "onlyBuiltDependencies": ["ffmpeg-static", "ffprobe-static"]
   }
 }

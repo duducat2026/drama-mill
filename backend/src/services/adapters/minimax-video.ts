@@ -17,19 +17,15 @@
  */
 
 /**
- * MiniMax H3 视频生成 Adapter
- * 端点: POST /v2/video_generation -> { task_id }
- * 轮询: GET  /v2/query/video_generation/{task_id} -> { task: { status, content.url, error } }
+ * MiniMax H3 生视频适配。
+ * 提交 POST /v2/video_generation 拿 task_id；轮询 GET /v2/query/video_generation/{task_id}，
+ * 官方把状态包在 { task: { status, content.url, error } } 里，这里同时兼容顶层平铺。
  *
- * 仅支持 MiniMax-H3 系列模型。content[] 多模态结构:
- * - text           提示词（必填，≤7000 字符）
- * - image_url      role: first_frame / last_frame / reference_image（参考图 ≤9）
- * - video_url      role: reference_video（≤3）
- * - audio_url      参考音频（≤3），混合总数 ≤12
- *
- * 注意:
- * - 文生视频 ratio 必填且不能为 adaptive；有首帧图（图生视频）时恒为 adaptive，省略 ratio
- * - H3 原生音画同步生成，官方文档无独立 generate_audio 开关，该字段忽略
+ * content[] 多模态拼装规则：text 必带（上限 7000 字符）；参考图按 role 区分
+ * first_frame / last_frame / reference_image（图 ≤9）；参考视频 ≤3、参考音频 ≤3，
+ * 全类型合计 ≤12。
+ * 两条口径注意：带首帧即图生视频，此时省略 ratio（官方恒 adaptive）；纯文生视频
+ * ratio 必填且只吃白名单值。H3 原生音画一体，没有独立音频开关，generateAudio 直接忽略。
  */
 import type {
   VideoProviderAdapter,
@@ -41,26 +37,50 @@ import type {
 } from './types'
 import { joinProviderUrl } from './url'
 
-/** 仅支持 MiniMax-H3 系列（前缀匹配，兼容未来 H3.x 变体） */
+/** 仅 MiniMax-H3 系列（小写前缀匹配，兼容 H3.x 变体） */
 const H3_MODEL_PREFIX = 'minimax-h3'
 const DEFAULT_MODEL = 'MiniMax-H3'
 
-/** 多模态参考素材上限：图片 9、视频 3、音频 3，混合总数 12 */
+/** 素材配额：图 9 / 视 3 / 音 3，混合总量 12；提示词上限 7000 字符 */
 const REF_LIMITS = { images: 9, videos: 3, audios: 3, total: 12 } as const
-
 const PROMPT_MAX_CHARS = 7000
 
-/** MiniMax 支持的宽高比 */
+/** 文生视频允许的画幅 */
 const VALID_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'])
 
 function parseUrlArray(raw?: string | null): string[] {
   if (!raw) return []
   try {
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr.filter((u) => typeof u === 'string' && u.trim()) : []
+    const list = JSON.parse(raw)
+    return Array.isArray(list) ? list.filter(u => typeof u === 'string' && u.trim()) : []
   } catch {
     return []
   }
+}
+
+/** 响应可能包一层 task 也可能平铺，统一剥出状态载体 */
+function unwrapTask(result: any): any {
+  return result.task && typeof result.task === 'object' ? result.task : result
+}
+
+/** error 归一为字符串，对象形态保留 [code] 前缀 */
+function pollError(err: any): string {
+  if (typeof err === 'string') return err
+  const text = err?.message || JSON.stringify(err) || 'Video generation failed'
+  return err && typeof err === 'object' && err.code ? `[${err.code}] ${text}` : text
+}
+
+/** 4-15 秒取整，缺省/非法回 5 */
+function clampDuration(duration?: number | null): number {
+  const parsed = Math.round(Number(duration || 5))
+  if (!Number.isFinite(parsed)) return 5
+  return Math.min(15, Math.max(4, parsed))
+}
+
+/** 项目分辨率档位映射到 H3 仅有的两档：480p/720p→768P，1080p/2K→2K */
+function toH3Resolution(resolution?: string | null): string {
+  const r = (resolution || '').toLowerCase()
+  return r === '2k' || r === '1080p' ? '2K' : '768P'
 }
 
 export class MiniMaxVideoAdapter implements VideoProviderAdapter {
@@ -73,43 +93,29 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     }
 
     const prompt = (record.prompt || '').trim()
-    const refImages = parseUrlArray(record.referenceImageUrls)
-    const refVideos = parseUrlArray(record.referenceVideoUrls)
-    const refAudios = parseUrlArray(record.referenceAudioUrls)
-    const firstFrame = (record.firstFrameUrl || record.imageUrl || '').trim()
-    const lastFrame = (record.lastFrameUrl || '').trim()
-
     if (!prompt) throw new Error('MiniMax H3 要求必须提供提示词（text content）')
     if (prompt.length > PROMPT_MAX_CHARS) {
       throw new Error(`提示词超长：MiniMax H3 上限 ${PROMPT_MAX_CHARS} 字符，当前 ${prompt.length}`)
     }
 
-    const totalRefs = refImages.length + refVideos.length + refAudios.length + (firstFrame ? 1 : 0) + (lastFrame ? 1 : 0)
-    if (refImages.length > REF_LIMITS.images || refVideos.length > REF_LIMITS.videos || refAudios.length > REF_LIMITS.audios || totalRefs > REF_LIMITS.total) {
+    const images = parseUrlArray(record.referenceImageUrls)
+    const videos = parseUrlArray(record.referenceVideoUrls)
+    const audios = parseUrlArray(record.referenceAudioUrls)
+    const firstFrame = (record.firstFrameUrl || record.imageUrl || '').trim()
+    const lastFrame = (record.lastFrameUrl || '').trim()
+    const totalRefs = images.length + videos.length + audios.length + (firstFrame ? 1 : 0) + (lastFrame ? 1 : 0)
+    if (images.length > REF_LIMITS.images || videos.length > REF_LIMITS.videos
+      || audios.length > REF_LIMITS.audios || totalRefs > REF_LIMITS.total) {
       throw new Error(`参考素材超限：图片≤${REF_LIMITS.images}、视频≤${REF_LIMITS.videos}、音频≤${REF_LIMITS.audios}、总数≤${REF_LIMITS.total}`)
-    }
-
-    const content: any[] = [{ type: 'text', text: prompt }]
-    if (firstFrame) content.push({ type: 'image_url', image_url: { url: firstFrame }, role: 'first_frame' })
-    if (lastFrame) content.push({ type: 'image_url', image_url: { url: lastFrame }, role: 'last_frame' })
-    for (const url of refImages) {
-      content.push({ type: 'image_url', image_url: { url }, role: 'reference_image' })
-    }
-    for (const url of refVideos) {
-      content.push({ type: 'video_url', video_url: { url }, role: 'reference_video' })
-    }
-    for (const url of refAudios) {
-      content.push({ type: 'audio_url', audio_url: { url } })
     }
 
     const body: any = {
       model,
-      content,
-      duration: this.normalizeDuration(record.duration),
-      resolution: this.normalizeResolution(record.resolution),
+      content: this.buildContent(prompt, firstFrame, lastFrame, images, videos, audios),
+      duration: clampDuration(record.duration),
+      resolution: toH3Resolution(record.resolution),
     }
-
-    // 图生视频（有首帧）ratio 恒为 adaptive，省略；文生视频 ratio 必填
+    // 首帧在场 = 图生视频，ratio 交给官方恒 adaptive；仅纯文生视频需要显式画幅
     if (!firstFrame) {
       const ratio = (record.aspectRatio || '').trim()
       body.ratio = VALID_RATIOS.has(ratio) ? ratio : '16:9'
@@ -118,22 +124,33 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     return {
       url: joinProviderUrl(config.baseUrl, '/v2', '/video_generation'),
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
       body,
     }
   }
 
+  /** content 数组顺序：文本 → 首/尾帧 → 参考图 → 参考视频 → 参考音频（音频无 role） */
+  private buildContent(prompt: string, firstFrame: string, lastFrame: string, images: string[], videos: string[], audios: string[]): any[] {
+    const content: any[] = [{ type: 'text', text: prompt }]
+    if (firstFrame) content.push({ type: 'image_url', image_url: { url: firstFrame }, role: 'first_frame' })
+    if (lastFrame) content.push({ type: 'image_url', image_url: { url: lastFrame }, role: 'last_frame' })
+    for (const url of images) {
+      content.push({ type: 'image_url', image_url: { url }, role: 'reference_image' })
+    }
+    for (const url of videos) {
+      content.push({ type: 'video_url', video_url: { url }, role: 'reference_video' })
+    }
+    for (const url of audios) {
+      content.push({ type: 'audio_url', audio_url: { url } })
+    }
+    return content
+  }
+
   parseGenerateResponse(result: any): VideoGenResponse {
-    if (result.task_id) {
-      return { isAsync: true, taskId: String(result.task_id) }
-    }
-    const videoUrl = result.task?.content?.url || result.content?.url || result.video_url
-    if (videoUrl) {
-      return { isAsync: false, videoUrl }
-    }
+    if (result.task_id) return { isAsync: true, taskId: String(result.task_id) }
+    const task = unwrapTask(result)
+    const videoUrl = task.content?.url || result.content?.url || result.video_url
+    if (videoUrl) return { isAsync: false, videoUrl }
     throw new Error('No task_id or video url in response')
   }
 
@@ -141,49 +158,24 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     return {
       url: joinProviderUrl(config.baseUrl, '/v2', `/query/video_generation/${taskId}`),
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
+      headers: { 'Authorization': `Bearer ${config.apiKey}` },
       body: undefined,
     }
   }
 
   parsePollResponse(result: any): VideoPollResponse {
-    // 官方响应为 { task: { status, content: { url }, error } }，兼容顶层平铺
-    const task = result.task && typeof result.task === 'object' ? result.task : result
-    const status = task.status
-
-    if (status === 'succeeded') {
-      return {
-        status: 'completed',
-        videoUrl: task.content?.url || task.video_url,
-      }
+    const task = unwrapTask(result)
+    if (task.status === 'succeeded') {
+      return { status: 'completed', videoUrl: task.content?.url || task.video_url }
     }
-    if (status === 'failed' || status === 'cancelled') {
-      const err = task.error
-      const msg = typeof err === 'string' ? err : (err?.message || JSON.stringify(err) || 'Video generation failed')
-      const code = err && typeof err === 'object' && err.code ? `[${err.code}] ` : ''
-      return { status: 'failed', error: `${code}${msg}` }
+    if (task.status === 'failed' || task.status === 'cancelled') {
+      return { status: 'failed', error: pollError(task.error) }
     }
-    return { status: status || 'processing' }
+    return { status: task.status || 'processing' }
   }
 
   extractVideoUrl(result: any): string | null {
-    const task = result.task && typeof result.task === 'object' ? result.task : result
+    const task = unwrapTask(result)
     return task.content?.url || task.video_url || null
-  }
-
-  private normalizeDuration(duration?: number | null): number {
-    const parsed = Math.round(Number(duration || 5))
-    if (!Number.isFinite(parsed)) return 5
-    // MiniMax H3 支持 4-15 秒
-    return Math.min(15, Math.max(4, parsed))
-  }
-
-  /** MiniMax 仅 768P / 2K 两档；项目侧 480p/720p 统一归到 768P，1080p/2K 归到 2K */
-  private normalizeResolution(resolution?: string | null): string {
-    const r = (resolution || '').toLowerCase()
-    if (r === '2k' || r === '1080p') return '2K'
-    return '768P'
   }
 }

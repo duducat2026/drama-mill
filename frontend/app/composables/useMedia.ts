@@ -1,48 +1,31 @@
-/*
- * Drama Mill — AI 短剧自动化生产平台 (https://github.com/your-org/drama-mill)
- * Copyright (C) 2026 Drama Mill <52859273@qq.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 /**
- * 媒体地址辅助 — 列表/卡片用缩略图与海报帧，大图预览仍用原图
- *
- * 命名约定（后端生成产物时自动产出，见 backend/src/utils/storage.ts、video-poster.ts）：
- *   图片 static/images/x.png      → 缩略图 static/images/x_thumb.webp
- *   视频 static/videos|merged/x.mp4 → 海报帧 static/videos|merged/x_poster.jpg
- * 存量文件可用 `npm run backfill-artwork`（backend）补齐。
+ * Drama Mill — AI 短剧生成平台
+ * AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
  */
+// 静态路径判定 + 图片后缀匹配，统一用于派生缩略/海报 URL
+const IMG_RE = /\.(png|jpe?g|webp|gif)$/i
+const VID_RE = /\.(mp4|webm|mov)$/i
+const HAS_STATIC = /\/static\//
+const TRAILING_EXT = /\.[^./]+$/
 
-/** 图片地址 → 缩略图地址；非 /static 图片（远程 URL 等）原样返回 */
-export function thumbOf(url: string): string {
-  if (!url || !url.includes('/static/')) return url
-  if (!/\.(png|jpe?g|webp|gif)$/i.test(url)) return url
-  return url.replace(/\.[^./]+$/, '_thumb.webp')
+/** 将原始图片 URL 转换为同名 _thumb.webp；外链/非图片类型透传 */
+export function thumbOf(addr: string): string {
+  if (!addr || !HAS_STATIC.test(addr)) return addr
+  if (!IMG_RE.test(addr)) return addr
+  return addr.replace(TRAILING_EXT, '_thumb.webp')
 }
 
-/** 缩略图加载失败（老数据未回填）时回退原图 */
-export function thumbFallback(e: Event, orig: string) {
-  const el = e.target as HTMLImageElement
-  if (!el || el.dataset.fbk || !orig) return
-  el.dataset.fbk = '1'
-  el.src = orig
+/** 绑定到 img@error，缩略图 404 时切回原图并打标记防循环 */
+export function thumbFallback(evt: Event, fallbackSrc: string) {
+  const img = evt.target as HTMLImageElement
+  if (!img || img.dataset.fbk || !fallbackSrc) return
+  img.dataset.fbk = '1'
+  img.src = fallbackSrc
 }
 
-/** 视频地址 → 海报帧地址；无法推导（远程 URL 等）时返回空串，不设置 poster */
-export function posterOf(url: string): string {
-  if (!url || !url.includes('/static/')) return ''
-  if (!/\.(mp4|webm|mov)$/i.test(url)) return ''
-  return url.replace(/\.[^./]+$/, '_poster.jpg')
+/** 将视频 URL 转换为同名 _poster.jpg；无法推导（远程/不支持格式）则返回空串 */
+export function posterOf(addr: string): string {
+  if (!addr || !HAS_STATIC.test(addr)) return ''
+  if (!VID_RE.test(addr)) return ''
+  return addr.replace(TRAILING_EXT, '_poster.jpg')
 }

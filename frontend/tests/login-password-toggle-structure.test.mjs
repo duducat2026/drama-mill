@@ -31,11 +31,12 @@ test('切换按钮不破坏登录表单语义', () => {
   assert.match(login, /\.login-pwd \.input \{ padding-right: 34px; \}/)
 })
 
-test('登录页提示首次部署默认账号（与后端 SEED_USERS 对齐）', () => {
+test('登录页仅提示普通用户默认账号（管理员账号只记录于 README）', () => {
   assert.match(login, /首次部署默认账号/)
-  // 管理员 drama-mill / drama-mill；普通用户 test / drama-mill
-  assert.match(login, /<code>drama-mill<\/code><span>\/<\/span><code>drama-mill<\/code>/)
+  // 普通用户 test / drama-mill
   assert.match(login, /<code>test<\/code><span>\/<\/span><code>drama-mill<\/code>/)
+  // 出于安全，管理员凭证行（drama-mill / drama-mill）不得出现在登录页
+  assert.doesNotMatch(login, /<code>drama-mill<\/code><span>\/<\/span><code>drama-mill<\/code>/)
   // 提示必须引导用户使用后立即改密
   assert.match(login, /修改密码/)
 })

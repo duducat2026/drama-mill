@@ -1,3 +1,4 @@
+# Nuxt 本地产物：依赖、开发缓存、SSR 与静态生成输出
 node_modules/
 .nuxt/
 .output/

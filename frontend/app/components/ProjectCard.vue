@@ -1,4 +1,8 @@
 <!--
+  Drama Mill — AI 短剧生成平台
+  AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
+-->
+<!--
   ProjectCard.vue — 项目启动台（index.vue）单张项目卡片，由超限文件拆分外提。
   自持状态：卡片菜单/状态快切菜单 + 手动标记项目状态；点击/删除经事件回传父页。
   样式：卡片内部样式必须随组件 scoped 挂载（父页 scoped 不穿透子组件内部元素）。

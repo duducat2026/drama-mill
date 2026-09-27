@@ -16,33 +16,34 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-export function joinProviderUrl(baseUrl: string, requiredPrefix: string, path: string) {
-  const normalizedBase = (baseUrl || '').replace(/\/+$/, '')
-  const normalizedPrefix = normalizeSegment(requiredPrefix)
-  const normalizedPath = normalizeSegment(path)
+/**
+ * 厂商 endpoint 拼接：用户在配置里填的 baseUrl 形态五花八门
+ * （带/不带协议、带/不带版本路径），这里统一保证最终 URL 落在
+ * requiredPrefix 之下再接 path，且前缀不因用户已写而重复叠加。
+ */
 
-  if (!normalizedBase) {
-    return `${normalizedPrefix}${normalizedPath}`
-  }
+/** 段首补一个 '/'，空段原样返回 */
+const slashHead = (seg: string) => (seg ? (seg.startsWith('/') ? seg : `/${seg}`) : '')
+
+/** 去掉串尾的全部 '/' */
+const trimTail = (s: string) => s.replace(/\/+$/, '')
+
+/** 串尾若不以 prefix 收尾则接上 prefix */
+const ensureTail = (s: string, prefix: string) => (s.endsWith(prefix) ? s : `${s}${prefix}`)
+
+export function joinProviderUrl(baseUrl: string, requiredPrefix: string, path: string) {
+  const prefix = slashHead(requiredPrefix)
+  const tail = slashHead(path)
+  const base = trimTail(baseUrl || '')
+  if (!base) return `${prefix}${tail}`
 
   try {
-    const url = new URL(normalizedBase)
-    const currentPath = url.pathname.replace(/\/+$/, '')
-    const mergedPrefix = currentPath.endsWith(normalizedPrefix)
-      ? currentPath
-      : `${currentPath}${normalizedPrefix}`
-
-    url.pathname = `${mergedPrefix}${normalizedPath}`.replace(/\/{2,}/g, '/')
-    return url.toString()
+    const parsed = new URL(base)
+    // 能走 URL 对象：只在 pathname 上做前缀合并，query/hash 原样保留
+    parsed.pathname = `${ensureTail(trimTail(parsed.pathname), prefix)}${tail}`.replace(/\/{2,}/g, '/')
+    return parsed.toString()
   } catch {
-    const basePath = normalizedBase.endsWith(normalizedPrefix)
-      ? normalizedBase
-      : `${normalizedBase}${normalizedPrefix}`
-    return `${basePath}${normalizedPath}`
+    // 非法 URL（裸 host 等）退化为纯字符串拼接
+    return `${ensureTail(base, prefix)}${tail}`
   }
-}
-
-function normalizeSegment(segment: string) {
-  if (!segment) return ''
-  return segment.startsWith('/') ? segment : `/${segment}`
 }
