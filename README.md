@@ -2,6 +2,8 @@
 
 <div align="center">
 
+[中文](./README.md) | [English](./README.en.md)
+
 **基于 TypeScript 全栈的 AI 短剧自动化生产平台**
 
 [![Version](https://img.shields.io/badge/version-v1.0.0-red?style=flat)](#更新日志)
@@ -458,10 +460,8 @@ cd frontend && npm run build     && npm test
 
 <div align="center">
 
-<!-- 支付宝捐赠二维码预留：图片就绪后替换为下方注释中的写法 -->
-**捐赠二维码即将上线，敬请期待**
-
-<!-- <img src="donate.png" alt="支付宝捐赠二维码" width="240" /> -->
+<!-- 支付宝捐赠二维码 -->
+<img src="donate.png" alt="支付宝捐赠二维码" width="240" />
 
 </div>
 
