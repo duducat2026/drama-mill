@@ -37,6 +37,8 @@
         <SettingsWatchdogPanel v-else-if="tab === 'watchdogs'" class="settings-scroll" />
         <!-- ===== 风格预设 ===== -->
         <SettingsStylesPanel v-else-if="tab === 'styles'" />
+        <!-- ===== 模型价格 ===== -->
+        <SettingsPricesPanel v-else-if="tab === 'prices'" />
       </div>
     </div>
 
@@ -67,10 +69,11 @@
 </template>
 
 <script setup>
-import { Plus, Pencil, Trash2, Loader2, Cpu, Palette, Star, Power, AlertTriangle, TimerReset, Eye, EyeOff, Copy, ArrowLeft, FileText, Image, Video } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Loader2, Cpu, Palette, Star, Power, AlertTriangle, TimerReset, Eye, EyeOff, Copy, ArrowLeft, FileText, Image, Video, Coins } from 'lucide-vue-next'
 import SettingsAiPanel from '~/components/settings/SettingsAiPanel.vue'
 import SettingsWatchdogPanel from '~/components/settings/SettingsWatchdogPanel.vue'
 import SettingsStylesPanel from '~/components/settings/SettingsStylesPanel.vue'
+import SettingsPricesPanel from '~/components/settings/SettingsPricesPanel.vue'
 import SettingsCfgEditor from '~/components/settings/SettingsCfgEditor.vue'
 import SettingsGenTestDialog from '~/components/settings/SettingsGenTestDialog.vue'
 import { useSettingsPage } from '~/composables/settings/useSettingsPage'
@@ -79,6 +82,7 @@ import { useSettingsPage } from '~/composables/settings/useSettingsPage'
 definePageMeta({ key: route => route.path })
 const baseTabs = [
   { id: 'ai', label: 'AI 服务', icon: Cpu },
+  { id: 'prices', label: '模型价格', icon: Coins },
   { id: 'watchdogs', label: '后台看门狗', icon: TimerReset },
   { id: 'styles', label: '风格预设', icon: Palette },
 ]

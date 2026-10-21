@@ -90,35 +90,38 @@ test('novels.vue has split button for novels without drama_id', () => {
   assert.match(page, /v-if="!n\.drama_id".*拆分/)
 })
 
-test('novels.vue has split dialog with template selector', () => {
+test('拆分弹窗（已拆分为 NovelsPreSplitDialog 组件）含模版选择器', () => {
   const page = readRepo('frontend/app/pages/novels.vue')
-  assert.match(page, /preSplitModal/)
-  assert.match(page, /preSplitForm/)
+  const dialog = readRepo('frontend/app/components/NovelsPreSplitDialog.vue')
+  // 页面持有弹窗状态（preSplitNovel），表单细节在子组件
+  assert.match(page, /preSplitNovel/)
+  assert.match(page, /<NovelsPreSplitDialog/)
+  assert.match(dialog, /preSplitForm/)
   // 弹窗标题改为"文档拆分"
-  assert.match(page, /文档拆分/)
+  assert.match(dialog, /文档拆分/)
   // 模版选择器
-  assert.match(page, /preSplitForm\.split_template_id/)
+  assert.match(dialog, /preSplitForm\.split_template_id/)
   // split_mode 支持 chars/paragraphs
-  assert.match(page, /preSplitForm\.split_mode/)
+  assert.match(dialog, /preSplitForm\.split_mode/)
   // 段落模式仍支持两种切分方式
-  assert.match(page, /preSplitForm\.mode === 'paragraphs'/)
-  assert.match(page, /preSplitForm\.mode === 'target'/)
+  assert.match(dialog, /preSplitForm\.mode === 'paragraphs'/)
+  assert.match(dialog, /preSplitForm\.mode === 'target'/)
   // 标题前缀输入
-  assert.match(page, /title_prefix/)
+  assert.match(dialog, /title_prefix/)
   // 源小说删除选项
-  assert.match(page, /delete_source/)
+  assert.match(dialog, /delete_source/)
 })
 
-test('novels.vue submitPreSplit passes template and split_mode params', () => {
-  const page = readRepo('frontend/app/pages/novels.vue')
-  assert.match(page, /async function submitPreSplit/)
-  assert.match(page, /novelAPI\.preSplit/)
-  assert.match(page, /split_template_id/)
-  assert.match(page, /split_mode/)
-  assert.match(page, /target_chars/)
-  // 拆分后回到第一页刷新
-  assert.match(page, /page\.value = 1/)
-  assert.match(page, /loadNovels\(\)/)
+test('submitPreSplit 传 template 与 split_mode 参数，成功后回第一页刷新', () => {
+  const dialog = readRepo('frontend/app/components/NovelsPreSplitDialog.vue')
+  const lib = readRepo('frontend/app/composables/useNovelsLibrary.js')
+  assert.match(dialog, /async function submitPreSplit/)
+  assert.match(dialog, /novelAPI\.preSplit/)
+  assert.match(dialog, /split_template_id/)
+  assert.match(dialog, /split_mode/)
+  assert.match(dialog, /target_chars/)
+  // 拆分后回到第一页刷新（成功回调在页面状态 composable）
+  assert.match(lib, /function onPreSplitDone\(\) \{[\s\S]*page\.value = 1[\s\S]*loadNovels\(\)/)
 })
 
 test('novels.vue has link to template management page', () => {

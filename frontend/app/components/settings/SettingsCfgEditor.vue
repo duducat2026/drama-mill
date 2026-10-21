@@ -78,6 +78,7 @@
             <textarea v-model="cfgForm.modelStr" class="textarea mono" rows="3" placeholder="model-name" spellcheck="false"></textarea>
             <span class="field-hint">多个模型用英文逗号分隔，第一个模型为此配置的默认模型。</span>
           </label>
+          <SettingsCfgPriceBlock :service-type="cfgServiceType" :model-str="cfgForm.modelStr" :provider="cfgForm.provider" />
           <label class="field">
             <span class="field-label">优先级</span>
             <input v-model.number="cfgForm.priority" class="input" type="number" min="0" max="999" />
@@ -117,6 +118,7 @@
 <script setup>
 import { Loader2, AlertTriangle, Eye, EyeOff, Copy, ArrowLeft } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
+import SettingsCfgPriceBlock from '~/components/settings/SettingsCfgPriceBlock.vue'
 
 const {
   route, serviceMeta, cfgServiceType, providerSelectOptions, copyText,

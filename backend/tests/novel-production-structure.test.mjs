@@ -131,7 +131,9 @@ test('前端 useApi 新增 novelAPI/productionAPI', () => {
 })
 
 test('前端向导与详情面板接入', () => {
+  // 向导 API 调用逻辑已抽到 useNovelWizard composable，组件本身保留 UI 骨架
   const wizard = read('../frontend/app/components/NovelImportWizard.vue')
+    + read('../frontend/app/composables/useNovelWizard.js')
   assert.match(wizard, /novelAPI/)
   assert.match(wizard, /productionAPI/)
   const index = read('../frontend/app/pages/index.vue')

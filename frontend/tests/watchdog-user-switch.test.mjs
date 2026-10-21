@@ -40,8 +40,8 @@ test('useWatchdogSwitch: 默认不启动 + 乐观更新回滚 + 单飞', () => {
 })
 
 test('看门狗单独成菜单，与 AI 服务平级', () => {
-  // 导航项与 AI 服务、风格预设同一组，id 与内容分支一一对应
-  assert.match(settingsPage, /\{ id: 'ai', label: 'AI 服务', icon: Cpu \},\s*\{ id: 'watchdogs', label: '后台看门狗', icon: TimerReset \},/)
+  // 导航项与 AI 服务、模型价格、风格预设同一组，id 与内容分支一一对应
+  assert.match(settingsPage, /\{ id: 'ai', label: 'AI 服务', icon: Cpu \},\s*\{ id: 'prices', label: '模型价格', icon: Coins \},\s*\{ id: 'watchdogs', label: '后台看门狗', icon: TimerReset \},/)
   assert.match(settingsPage, /v-else-if="tab === 'watchdogs'" class="settings-scroll"/)
   assert.match(settingsPage, /<h2 class="settings-title">后台看门狗<\/h2>/)
   // 面板整体从 AI 服务分支移出：AI 分支内不再残留看门狗 UI

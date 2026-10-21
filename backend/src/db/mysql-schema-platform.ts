@@ -267,6 +267,23 @@ export const mysqlSchemaPlatformStatements: string[] = [
     UNIQUE KEY uk_model_prices_provider_model (provider, model)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  // 用户级模型价：从平台刊例价导入或自定义；计价按 user_id+model 优先于 model_prices
+  `CREATE TABLE IF NOT EXISTS user_model_prices (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    provider VARCHAR(64) NOT NULL,
+    model VARCHAR(128) NOT NULL,
+    billing_type VARCHAR(32) NOT NULL,
+    input_price DOUBLE DEFAULT 0,
+    output_price DOUBLE DEFAULT 0,
+    unit_price DOUBLE DEFAULT 0,
+    currency VARCHAR(16) DEFAULT 'CNY',
+    source VARCHAR(32) DEFAULT 'manual',
+    updated_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uniq_ump_user_model (user_id, model),
+    INDEX idx_ump_user_id (user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   // AI 用量与成本明细：每次模型调用落一条（文本按 token，图片按张，视频按秒）
   `CREATE TABLE IF NOT EXISTS usage_records (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,

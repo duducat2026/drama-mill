@@ -19,7 +19,7 @@
 /**
  * Drizzle schema — 平台侧：AI 配置 / 任务 / 用户 / 计费 / 批量生产。
  */
-import { mysqlTable, text, int, double, boolean, primaryKey, varchar, mediumtext, bigint } from 'drizzle-orm/mysql-core'
+import { mysqlTable, text, int, double, boolean, primaryKey, varchar, mediumtext, bigint, uniqueIndex, index } from 'drizzle-orm/mysql-core'
 
 
 export const aiServiceConfigs = mysqlTable('ai_service_configs', {
@@ -231,6 +231,25 @@ export const modelPrices = mysqlTable('model_prices', {
   source: varchar('source', { length: 512 }),
   updatedAt: varchar('updated_at', { length: 64 }).notNull(),
 })
+
+// 用户级模型价：从平台刊例价导入或自定义，计价时按 user_id+model 优先于 model_prices
+export const userModelPrices = mysqlTable('user_model_prices', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
+  provider: varchar('provider', { length: 64 }).notNull(),
+  model: varchar('model', { length: 128 }).notNull(),
+  billingType: varchar('billing_type', { length: 32 }).notNull(),
+  inputPrice: double('input_price').default(0),
+  outputPrice: double('output_price').default(0),
+  unitPrice: double('unit_price').default(0),
+  currency: varchar('currency', { length: 16 }).default('CNY'),
+  // platform=从平台基准价导入 / manual=用户自定义或改价
+  source: varchar('source', { length: 32 }).default('manual'),
+  updatedAt: varchar('updated_at', { length: 64 }).notNull(),
+}, (t) => [
+  uniqueIndex('uniq_ump_user_model').on(t.userId, t.model),
+  index('idx_ump_user_id').on(t.userId),
+])
 
 export const usageRecords = mysqlTable('usage_records', {
   id: int('id').primaryKey().autoincrement(),

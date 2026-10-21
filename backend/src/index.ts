@@ -50,6 +50,7 @@ import novelSplitTemplates from './routes/novel-split-templates.js'
 import production from './routes/production.js'
 import productionBatch from './routes/production-batch.js'
 import costs from './routes/costs.js'
+import userModelPrices from './routes/user-model-prices.js'
 import admin from './routes/admin/index.js'
 import auth from './routes/auth.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
@@ -107,6 +108,7 @@ api.route('/novel-split-templates', novelSplitTemplates)
 api.route('/production', production)
 api.route('/production-batch', productionBatch)
 api.route('/costs', costs)
+api.route('/model-prices', userModelPrices)
 api.route('/admin', admin)
 
 app.route('/api/v1', api)

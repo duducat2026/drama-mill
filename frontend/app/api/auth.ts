@@ -36,6 +36,27 @@ export const aiCallAPI = {
   set: (enabled: boolean) => api.put<{ enabled: boolean }>('/auth/ai-call', { enabled }),
 }
 
+// 用户级模型价：从平台基准价导入 / 自定义改价，计价优先于平台刊例价
+export const userModelPriceAPI = {
+  list: (params?: { keyword?: string; billing_type?: string }) => {
+    const query = new URLSearchParams()
+    if (params?.keyword) query.set('keyword', params.keyword)
+    if (params?.billing_type) query.set('billing_type', params.billing_type)
+    return api.get(`/model-prices${query.size ? `?${query.toString()}` : ''}`)
+  },
+  catalog: (params?: { keyword?: string; billing_type?: string; page?: number; page_size?: number }) => {
+    const query = new URLSearchParams()
+    for (const k of ['keyword', 'billing_type', 'page', 'page_size'] as const) {
+      if (params?.[k] !== undefined && params?.[k] !== '') query.set(k, String(params[k]))
+    }
+    return api.get(`/model-prices/catalog${query.size ? `?${query.toString()}` : ''}`)
+  },
+  import: (items: { provider?: string; model: string }[]) => api.post('/model-prices/import', { items }),
+  create: (d: any) => api.post('/model-prices', d),
+  update: (id: number, d: any) => api.put(`/model-prices/${id}`, d),
+  remove: (id: number) => api.del(`/model-prices/${id}`),
+}
+
 /** 看门狗类型：retry = 失败任务自动重提，asset = 缺图资产自动补生成 */
 export type WatchdogKind = 'retry' | 'asset'
 

@@ -17,53 +17,18 @@
  */
 
 /**
- * AI 成本核算服务 — 每次模型调用落一条 usage_records，按刊例价（model_prices）计价
+ * AI 成本核算服务 — 每次模型调用落一条 usage_records，按刊例价计价
  * 价格单位：token 类 元/百万Token；image 元/张；video_second 元/秒（均为 CNY）
+ * 查价优先级见 cost-price-lookup：用户级模型价 → 平台刊例价
  */
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
+import { lookupPrice, type PriceRow } from './cost-price-lookup.js'
 
-interface PriceRow {
-  billingType: string
-  inputPrice: number | null
-  outputPrice: number | null
-  unitPrice: number | null
-}
+export type { PriceRow }
 
-// 价格表内存缓存（60s），避免每次调用查库；
-// 主键 provider|model，另建 model 单键索引：OpenAI 兼容网关接百炼模型时 provider 为 openai，需回退按模型名匹配刊例价
-let priceCache: Map<string, PriceRow> | null = null
-let modelCache: Map<string, PriceRow> | null = null
-let priceCacheAt = 0
-
-async function getPriceMaps(): Promise<{ exact: Map<string, PriceRow>; byModel: Map<string, PriceRow> }> {
-  if (priceCache && modelCache && Date.now() - priceCacheAt < 60_000) return { exact: priceCache, byModel: modelCache }
-  const rows = await db.select().from(schema.modelPrices)
-  priceCache = new Map(rows.map(r => [`${r.provider}|${r.model}`, {
-    billingType: r.billingType,
-    inputPrice: r.inputPrice,
-    outputPrice: r.outputPrice,
-    unitPrice: r.unitPrice,
-  }]))
-  modelCache = new Map(rows.map(r => [r.model, {
-    billingType: r.billingType,
-    inputPrice: r.inputPrice,
-    outputPrice: r.outputPrice,
-    unitPrice: r.unitPrice,
-  }]))
-  priceCacheAt = Date.now()
-  return { exact: priceCache, byModel: modelCache }
-}
-
-/** 查价：provider|model 精确命中优先，其次按模型名回退（兼容 OpenAI 兼容网关） */
-async function lookupPrice(provider: string | null | undefined, model: string | null | undefined): Promise<PriceRow | undefined> {
-  if (!model) return undefined
-  const { exact, byModel } = await getPriceMaps()
-  return (provider ? exact.get(`${provider}|${model}`) : undefined) ?? byModel.get(model)
-}
-
-export interface UsageContext {
+interface UsageContext {
   userId?: number | null
   dramaId?: number | null
   episodeId?: number | null
@@ -110,7 +75,7 @@ export async function recordTextUsage(
 ) {
   try {
     if (!inputTokens && !outputTokens) return
-    const price = await lookupPrice(provider, model)
+    const price = await lookupPrice(provider, model, ctx.userId)
     const { cost, missing } = priceTokens(price, inputTokens, outputTokens)
     await db.insert(schema.usageRecords).values({
       userId: ctx.userId ?? null,
@@ -135,7 +100,7 @@ export async function recordTextUsage(
 /** 记录一次图片生成（完成时计 1 张） */
 export async function recordImageUsage(provider: string, model: string, ctx: UsageContext = {}) {
   try {
-    const price = await lookupPrice(provider, model)
+    const price = await lookupPrice(provider, model, ctx.userId)
     const missing = !price || price.billingType !== 'image'
     const cost = missing ? 0 : (price!.unitPrice || 0)
     await db.insert(schema.usageRecords).values({
@@ -160,7 +125,7 @@ export async function recordImageUsage(provider: string, model: string, ctx: Usa
 /** 记录一次视频生成（按请求时长秒数计价） */
 export async function recordVideoUsage(provider: string, model: string, seconds: number, ctx: UsageContext = {}) {
   try {
-    const price = await lookupPrice(provider, model)
+    const price = await lookupPrice(provider, model, ctx.userId)
     const missing = !price || price.billingType !== 'video_second'
     const cost = missing ? 0 : (price!.unitPrice || 0) * (seconds || 0)
     await db.insert(schema.usageRecords).values({
