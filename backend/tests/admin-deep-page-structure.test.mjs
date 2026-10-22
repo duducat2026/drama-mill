@@ -1,8 +1,8 @@
 /*
  * 管理端大表深翻页治理 — 结构测试
- * 覆盖：audit/videos/storyboards/merges/novels/costs/dramas 七列表的 COUNT 缓存化、深页上限守卫、
+ * 覆盖：audit/videos/storyboards/merges/novels/costs/dramas/ai-configs 八列表的 COUNT 缓存化、深页上限守卫、
  *       排序对齐复合索引（DDL + 存量迁移 1.97/1.98）、分镜 keyword 剔除大字段 LIKE、
- *       视频运维动作与用户列表的全表载入禁令（下推 SQL）。
+ *       视频运维动作与用户列表的全表载入禁令（下推 SQL）、资产列表 UNION ALL SQL 层分页。
  * EXPLAIN 实测（本地库 2026-09-20）：新索引下三条深翻页 SQL 均 Backward index scan，
  *   改造前全部 Using filesort（千万级致命）。
  */
@@ -14,26 +14,27 @@ import { readAdminSources } from './helpers/admin-sources.mjs'
 const root = new URL('..', import.meta.url)
 const read = p => readFileSync(new URL(p, root), 'utf8')
 
-test('七列表 total 走 cachedTotal（60s 缓存 + in-flight 去重），不再每请求裸 COUNT', () => {
+test('八列表 total 走 cachedTotal（60s 缓存 + in-flight 去重），不再每请求裸 COUNT', () => {
   const src = readAdminSources(root)
   assert.match(src, /export async function cachedTotal/)
   assert.match(src, /const COUNT_TTL_MS = 60_000/)
-  for (const base of ['admin:audit', 'admin:videos', 'admin:storyboards', 'admin:merges', 'admin:novels', 'admin:costs', 'admin:dramas']) {
+  for (const base of ['admin:audit', 'admin:videos', 'admin:storyboards', 'admin:merges', 'admin:novels', 'admin:costs', 'admin:dramas', 'admin:ai-configs']) {
     assert.match(src, new RegExp(`cachedTotal\\(countKey\\('${base}'`))
   }
   // 每文件恰好一处 COUNT（在 loader 闭包内），无遗留的裸 Promise.all count
   // videos 例外：一键重提/历史补跑各带一处结果计数 count()，共三处
-  for (const [f, n] of [['audit', 1], ['storyboards', 1], ['merges', 1], ['novels', 1], ['costs', 1], ['videos', 3]]) {
+  // assets 例外：UNION 分支共享同一 count() 字面量，simpleSource/sbSource 各一处
+  for (const [f, n] of [['audit', 1], ['storyboards', 1], ['merges', 1], ['novels', 1], ['costs', 1], ['videos', 3], ['ai-configs', 1], ['assets', 2]]) {
     const srcRoute = read(`src/routes/admin/${f}.ts`)
     assert.equal((srcRoute.match(/count\(\)/g) || []).length, n, `${f}.ts count() 次数应为 ${n}`)
   }
 })
 
-test('七列表深页封顶：offset 超限直接 400 提示过滤', () => {
+test('八列表深页封顶：offset 超限直接 400 提示过滤', () => {
   const src = readAdminSources(root)
   assert.match(src, /export const MAX_PAGED_OFFSET = 50_000/)
   assert.match(src, /export function tooDeep\(page: number, pageSize: number\)/)
-  for (const f of ['audit', 'videos', 'storyboards', 'merges', 'novels', 'costs', 'dramas']) {
+  for (const f of ['audit', 'videos', 'storyboards', 'merges', 'novels', 'costs', 'dramas', 'ai-configs', 'assets']) {
     assert.match(read(`src/routes/admin/${f}.ts`), /if \(tooDeep\(page, pageSize\)\) return badRequest/, `${f}.ts 缺深页封顶守卫`)
   }
 })
@@ -56,6 +57,23 @@ test('用户列表分页下推 SQL：先分页后算存储用量，不再全表�
   assert.match(src, /db\.select\(\)\.from\(schema\.users\)\.where\(where\)/)
   assert.doesNotMatch(src, /paged\(withUsage/, '用量必须只算当页，禁止全表算完再切片')
   assert.doesNotMatch(src, /let rows = await db\.select\(\)\.from\(schema\.users\)\s*\n\s*if \(keyword\) rows = rows\.filter/)
+})
+
+test('AI 网关列表：过滤/排序/分页下推 SQL + COUNT 缓存，禁止全表载入后内存切页', () => {
+  const src = read('src/routes/admin/ai-configs.ts')
+  assert.match(src, /\.limit\(pageSize\)\.offset\(\(page - 1\) \* pageSize\)/)
+  assert.match(src, /cachedTotal\(countKey\('admin:ai-configs'/)
+  assert.doesNotMatch(src, /rows = rows\.filter|rows\.sort\(/, '禁止全表载入后内存过滤/排序')
+  assert.doesNotMatch(src, /await db\.select\(\)\.from\(schema\.aiServiceConfigs\)$/, '禁止无 WHERE 全表载入')
+})
+
+test('资产列表 UNION ALL SQL 层分页：禁止限量拉取后内存合并切页', () => {
+  const src = read('src/routes/admin/assets.ts')
+  assert.match(src, /unionAll\(/)
+  assert.match(src, /\.limit\(pageSize\)\.offset\(\(page - 1\) \* pageSize\)/)
+  assert.match(src, /cachedTotal\(countKey\('admin:assets'/)
+  assert.match(src, /orderBy\(sql`created_at DESC, id DESC`\)/, 'UNION 尾部必须整库排序保证跨页稳定')
+  assert.doesNotMatch(src, /ADMIN_ASSET_SOURCE_LIMIT|rows\.push\(|rows\.sort\(|\bpaged\(/, '限量拉取 + 内存合并分页禁止回退')
 })
 
 test('拼接成片列表不选取 scenes 大字段（TEXT 分镜 JSON 只入库不进列表响应）', () => {

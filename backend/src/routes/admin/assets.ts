@@ -18,9 +18,10 @@
 
 import { Hono } from 'hono'
 import { db, schema } from '../../db/index.js'
-import { success } from '../../utils/response.js'
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { pageOf, paged, userMap, dramaMap } from './shared.js'
+import { badRequest, success } from '../../utils/response.js'
+import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { pageOf, tooDeep } from './shared.js'
+import { cachedTotal, countKey } from './count-cache.js'
 
 const app = new Hono()
 
@@ -28,11 +29,25 @@ const app = new Hono()
 
 // GET /admin/assets?user_id=&drama_id=&drama_keyword=&type=&keyword=&page= — 预览复用 /static
 // assets 表为历史遗留死表（全代码库无写入点）：真实资产落在 characters/scenes/props/storyboards，
-// 本接口按类型聚合四张表；过滤条件全部下推 SQL，各源限量拉取后内存合并分页（不做全表加载）
-const ADMIN_ASSET_SOURCE_LIMIT = 2000
+// 本接口按类型把各源查询组成 UNION ALL，排序/计数/分页全部在 SQL 层完成（不做内存合并切页）
+const kwCond = (col: any, keyword: string) => sql`LOWER(${col}) LIKE ${`%${keyword}%`}`
+const alive = (t: any) => isNull(t.deletedAt)
+const hasUrl = (col: any) => and(sql`${col} IS NOT NULL`, sql`${col} <> ''`)
+
+// 统一投影别名：各源列名不同（image_url/composed_image/video_url），必须 AS 对齐才能进 UNION
+const proj = (id: any, name: any, url: any, typeLit: string, category: any, dramaId: any, createdAt: any) => ({
+  id: sql`${id}`.as('id'),
+  name: sql`${name}`.as('name'),
+  url: sql`${url}`.as('url'),
+  type: sql`${typeLit}`.as('type'),
+  category: sql`${category}`.as('category'),
+  drama_id: sql`${dramaId}`.as('drama_id'),
+  created_at: sql`${createdAt}`.as('created_at'),
+})
 
 app.get('/assets', async (c) => {
   const { page, pageSize } = pageOf(c)
+  if (tooDeep(page, pageSize)) return badRequest(c, '翻页过深，请用项目/类型/关键词过滤后查询')
   const userId = Number(c.req.query('user_id')) || undefined
   const dramaId = Number(c.req.query('drama_id')) || undefined
   const type = c.req.query('type')
@@ -58,78 +73,73 @@ app.get('/assets', async (c) => {
   if (dramaId) dramaScope = dramaScope ? dramaScope.filter(id => id === dramaId) : [dramaId]
   if (dramaScope && !dramaScope.length) return success(c, { total: 0, page, page_size: pageSize, items: [] })
 
-  const kwCond = (col: any) => keyword ? sql`LOWER(${col}) LIKE ${`%${keyword}%`}` : undefined
-  const alive = (t: any) => isNull(t.deletedAt)
-  const hasUrl = (col: any) => and(sql`${col} IS NOT NULL`, sql`${col} <> ''`)
-  type AssetRow = { id: number; url: string | null; name: string | null; type: string; category: string | null; drama_id: number | null; user_id: number | null; created_at: string }
-  const rows: AssetRow[] = []
+  const scopeCond = (col: any) => dramaScope ? inArray(col, dramaScope) : undefined
+  const kw = (col: any) => keyword ? kwCond(col, keyword) : undefined
+  type SourceDef = { query: any; countQuery: () => Promise<{ c: number }[]> }
+  const defs: SourceDef[] = []
 
-  // 角色/场景/道具：三表结构同构（drama_id + name + image_url），各自带条件限量拉取
-  if (!type || type === 'character') {
-    const list = await db.select({
-      id: schema.characters.id, name: schema.characters.name, url: schema.characters.imageUrl,
-      category: schema.characters.role, dramaId: schema.characters.dramaId, createdAt: schema.characters.createdAt,
-    }).from(schema.characters)
-      .where(and(alive(schema.characters), hasUrl(schema.characters.imageUrl),
-        dramaScope ? inArray(schema.characters.dramaId, dramaScope) : undefined, kwCond(schema.characters.name)))
-      .orderBy(sql`${schema.characters.createdAt} DESC`).limit(ADMIN_ASSET_SOURCE_LIMIT)
-    rows.push(...list.map(r => ({ id: r.id, url: r.url, name: r.name, type: 'character', category: r.category, drama_id: r.dramaId, user_id: null, created_at: r.createdAt })))
-  }
-  if (!type || type === 'scene') {
-    const list = await db.select({
-      id: schema.scenes.id, name: schema.scenes.location, url: schema.scenes.imageUrl,
-      category: schema.scenes.time, dramaId: schema.scenes.dramaId, createdAt: schema.scenes.createdAt,
-    }).from(schema.scenes)
-      .where(and(alive(schema.scenes), hasUrl(schema.scenes.imageUrl),
-        dramaScope ? inArray(schema.scenes.dramaId, dramaScope) : undefined, kwCond(schema.scenes.location)))
-      .orderBy(sql`${schema.scenes.createdAt} DESC`).limit(ADMIN_ASSET_SOURCE_LIMIT)
-    rows.push(...list.map(r => ({ id: r.id, url: r.url, name: r.name, type: 'scene', category: r.category, drama_id: r.dramaId, user_id: null, created_at: r.createdAt })))
-  }
-  if (!type || type === 'prop') {
-    const list = await db.select({
-      id: schema.props.id, name: schema.props.name, url: schema.props.imageUrl,
-      category: schema.props.type, dramaId: schema.props.dramaId, createdAt: schema.props.createdAt,
-    }).from(schema.props)
-      .where(and(alive(schema.props), hasUrl(schema.props.imageUrl),
-        dramaScope ? inArray(schema.props.dramaId, dramaScope) : undefined, kwCond(schema.props.name)))
-      .orderBy(sql`${schema.props.createdAt} DESC`).limit(ADMIN_ASSET_SOURCE_LIMIT)
-    rows.push(...list.map(r => ({ id: r.id, url: r.url, name: r.name, type: 'prop', category: r.category, drama_id: r.dramaId, user_id: null, created_at: r.createdAt })))
-  }
-  // 分镜图/视频：分镜表无 drama_id，经 episodes 关联；无 user_id 列，同样经项目归属反查（按需）
-  if (!type || type === 'storyboard' || type === 'image' || type === 'video') {
-    const sbBase = db.select({
-      id: schema.storyboards.id, title: schema.storyboards.title,
-      image: schema.storyboards.composedImage, video: schema.storyboards.videoUrl,
-      category: schema.storyboards.shotType, dramaId: schema.episodes.dramaId, createdAt: schema.storyboards.createdAt,
-    }).from(schema.storyboards)
-      .innerJoin(schema.episodes, eq(schema.storyboards.episodeId, schema.episodes.id))
-      .where(and(alive(schema.storyboards), dramaScope ? inArray(schema.episodes.dramaId, dramaScope) : undefined, kwCond(schema.storyboards.title)))
-      .orderBy(sql`${schema.storyboards.createdAt} DESC`).limit(ADMIN_ASSET_SOURCE_LIMIT)
-    const list = await sbBase
-    if (!type || type === 'storyboard' || type === 'image') {
-      rows.push(...list.filter(r => r.image).map(r => ({ id: r.id, url: r.image, name: r.title, type: 'image', category: r.category, drama_id: r.dramaId, user_id: null, created_at: r.createdAt })))
-    }
-    if (!type || type === 'video') {
-      rows.push(...list.filter(r => r.video).map(r => ({ id: r.id, url: r.video, name: r.title, type: 'video', category: r.category, drama_id: r.dramaId, user_id: null, created_at: r.createdAt })))
+  // 角色/场景/道具：三表结构同构（drama_id + name + image_url），各成一个 UNION 分支
+  const simpleSource = (table: any, nameCol: any, catCol: any, typeLit: string): SourceDef => {
+    const where = and(alive(table), hasUrl(table.imageUrl), scopeCond(table.dramaId), kw(nameCol))
+    return {
+      query: db.select(proj(table.id, nameCol, table.imageUrl, typeLit, catCol, table.dramaId, table.createdAt)).from(table).where(where),
+      countQuery: () => db.select({ c: count() }).from(table).where(where),
     }
   }
+  if (!type || type === 'character') defs.push(simpleSource(schema.characters, schema.characters.name, schema.characters.role, 'character'))
+  if (!type || type === 'scene') defs.push(simpleSource(schema.scenes, schema.scenes.location, schema.scenes.time, 'scene'))
+  if (!type || type === 'prop') defs.push(simpleSource(schema.props, schema.props.name, schema.props.type, 'prop'))
 
-  rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
-  const users = await userMap()
-  const dramas = await dramaMap()
-  // 用户名：经项目归属反查（每页仅涉及少量项目，按需点查）
-  const dramaOwners = new Map<number, number>()
-  if (rows.length) {
-    const ownerRows = await db.select({ id: schema.dramas.id, userId: schema.dramas.userId }).from(schema.dramas)
-      .where(inArray(schema.dramas.id, [...new Set(rows.map(r => r.drama_id).filter((v): v is number => !!v))]))
-    for (const d of ownerRows) if (d.userId) dramaOwners.set(d.id, d.userId)
+  // 分镜图/视频：分镜表无 drama_id，经 episodes 关联；image/video 两个分支各带非空 URL 条件
+  const sbSource = (urlCol: any, typeLit: string): SourceDef => {
+    const where = and(alive(schema.storyboards), hasUrl(urlCol), scopeCond(schema.episodes.dramaId), kw(schema.storyboards.title))
+    return {
+      query: db.select(proj(schema.storyboards.id, schema.storyboards.title, urlCol, typeLit, schema.storyboards.shotType, schema.episodes.dramaId, schema.storyboards.createdAt))
+        .from(schema.storyboards).innerJoin(schema.episodes, eq(schema.storyboards.episodeId, schema.episodes.id)).where(where),
+      countQuery: () => db.select({ c: count() }).from(schema.storyboards).innerJoin(schema.episodes, eq(schema.storyboards.episodeId, schema.episodes.id)).where(where),
+    }
   }
-  const result = paged(rows, page, pageSize)
+  if (!type || type === 'storyboard' || type === 'image') defs.push(sbSource(schema.storyboards.composedImage, 'image'))
+  if (!type || type === 'video') defs.push(sbSource(schema.storyboards.videoUrl, 'video'))
+  if (!defs.length) return success(c, { total: 0, page, page_size: pageSize, items: [] })
+
+  // UNION ALL + 尾部 ORDER BY/LIMIT：整库排序分页交给 MySQL（created_at/id 为 UNION 别名）
+  let unioned: any = defs[0].query
+  for (let i = 1; i < defs.length; i++) unioned = unioned.unionAll(defs[i].query)
+  const [rows, total] = await Promise.all([
+    unioned.orderBy(sql`created_at DESC, id DESC`).limit(pageSize).offset((page - 1) * pageSize),
+    // 总数 = 各分支 COUNT 之和，按过滤条件缓存 60s，翻页不重复计数
+    cachedTotal(countKey('admin:assets', userId, dramaId, type, keyword, dramaKeyword), async () => {
+      const counts = await Promise.all(defs.map(d => d.countQuery()))
+      return counts.reduce((sum, r) => sum + Number(r[0]?.c || 0), 0)
+    }),
+  ])
+
+  // 用户名/项目名只对当页涉及的少量行点查，不再全表 userMap/dramaMap
+  const pageDramaIds: number[] = [...new Set((rows as any[]).map(r => r.drama_id).filter((v): v is number => !!v))]
+  const ownerRows = pageDramaIds.length
+    ? await db.select({ id: schema.dramas.id, userId: schema.dramas.userId, title: schema.dramas.title })
+        .from(schema.dramas).where(inArray(schema.dramas.id, pageDramaIds))
+    : []
+  const dramas = new Map(ownerRows.map(d => [d.id, { title: d.title, userId: d.userId }]))
+  const ownerIds = [...new Set(ownerRows.map(d => d.userId).filter((v): v is number => !!v))]
+  const userRows = ownerIds.length
+    ? await db.select({ id: schema.users.id, username: schema.users.username }).from(schema.users)
+        .where(inArray(schema.users.id, ownerIds))
+    : []
+  const users = new Map(userRows.map(u => [u.id, { username: u.username }]))
   return success(c, {
-    ...result,
-    items: result.items.map(a => {
-      const ownerId = a.drama_id ? dramaOwners.get(a.drama_id) : undefined
-      return { ...a, username: ownerId ? users.get(ownerId)?.username ?? null : null, drama_title: a.drama_id ? dramas.get(a.drama_id)?.title ?? null : null }
+    total,
+    page,
+    page_size: pageSize,
+    items: rows.map((r: any) => {
+      const ownerId = r.drama_id ? dramas.get(r.drama_id)?.userId : undefined
+      return {
+        ...r,
+        user_id: null,
+        username: ownerId ? users.get(ownerId)?.username ?? null : null,
+        drama_title: r.drama_id ? dramas.get(r.drama_id)?.title ?? null : null,
+      }
     }),
   })
 })

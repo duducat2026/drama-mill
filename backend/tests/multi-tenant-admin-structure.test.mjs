@@ -117,11 +117,13 @@ test('admin assets aggregates real asset tables instead of the dead assets table
   // assets 表为历史遗留死表（全代码库无写入点），资产管理接口禁止回退查它（admin 路由已拆分，直接读 assets 子路由）
   const assetSection = read('src/routes/admin/assets.ts')
   assert.doesNotMatch(assetSection, /from\(schema\.assets\)/)
-  // 真实资产落在 characters/scenes/props/storyboards 四张表聚合，条件全部下推 SQL
-  assert.match(assetSection, /from\(schema\.characters\)/)
-  assert.match(assetSection, /from\(schema\.scenes\)/)
-  assert.match(assetSection, /from\(schema\.props\)/)
+  // 真实资产落在 characters/scenes/props/storyboards 四张表，各成 UNION ALL 分支，条件全部下推 SQL
+  assert.match(assetSection, /simpleSource\(schema\.characters, schema\.characters\.name/)
+  assert.match(assetSection, /simpleSource\(schema\.scenes, schema\.scenes\.location/)
+  assert.match(assetSection, /simpleSource\(schema\.props, schema\.props\.name/)
   assert.match(assetSection, /from\(schema\.storyboards\)/)
   assert.match(assetSection, /innerJoin\(schema\.episodes/)
-  assert.match(assetSection, /ADMIN_ASSET_SOURCE_LIMIT/)
+  assert.match(assetSection, /unionAll\(/)
+  // 限量拉取 + 内存合并切页已废弃，禁止回退
+  assert.doesNotMatch(assetSection, /ADMIN_ASSET_SOURCE_LIMIT/)
 })
