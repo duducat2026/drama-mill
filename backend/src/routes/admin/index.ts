@@ -28,7 +28,6 @@ import videosRoutes from './videos.js'
 import mergesRoutes from './merges.js'
 import panelRoutes from './panel.js'
 import costsRoutes from './costs.js'
-import modelPricesRoutes from './model-prices.js'
 import modelCatalogRoutes from './model-catalog.js'
 import storageRoutes from './storage.js'
 import monitorRoutes from './monitor.js'
@@ -48,7 +47,6 @@ app.route('/', videosRoutes)
 app.route('/', mergesRoutes)
 app.route('/', panelRoutes)
 app.route('/', costsRoutes)
-app.route('/', modelPricesRoutes)
 app.route('/', modelCatalogRoutes)
 app.route('/', storageRoutes)
 app.route('/', monitorRoutes)

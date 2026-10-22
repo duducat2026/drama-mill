@@ -18,10 +18,11 @@
 
 import { Hono } from 'hono'
 import { db, schema } from '../../db/index.js'
-import { notFound, now, success } from '../../utils/response.js'
+import { badRequest, notFound, now, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
-import { pageOf, userMap, dramaMap } from './shared.js'
+import { and, count, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { pageOf, tooDeep, userMap, dramaMap } from './shared.js'
+import { cachedTotal, countKey } from './count-cache.js'
 
 const app = new Hono()
 
@@ -45,6 +46,7 @@ const ADMIN_NOVEL_SLIM = {
 // GET /admin/novels?username=&keyword=&from=&to=&page= — 过滤条件全部下推 SQL（COUNT + LIMIT/OFFSET）
 app.get('/novels', async (c) => {
   const { page, pageSize } = pageOf(c)
+  if (tooDeep(page, pageSize)) return badRequest(c, '翻页过深，请用用户名/关键词/日期过滤后查询')
   const username = (c.req.query('username') || '').trim().toLowerCase()
   const keyword = (c.req.query('keyword') || '').trim().toLowerCase()
   const from = c.req.query('from')
@@ -69,8 +71,11 @@ app.get('/novels', async (c) => {
   if (to) conds.push(sql`${schema.novels.createdAt} <= ${`${to}\uFFFF`}`)
   const where = and(...conds)
 
-  const [countRow] = await db.select({ c: sql<number>`COUNT(*)` }).from(schema.novels).where(where)
-  const total = Number(countRow?.c) || 0
+  // COUNT(*) 缓存 60s + 并发去重（对齐 audit/videos/storyboards/merges 治理）
+  const total = await cachedTotal(countKey('admin:novels', username, keyword, from, to), async () => {
+    const [r] = await db.select({ c: count() }).from(schema.novels).where(where)
+    return Number(r?.c) || 0
+  })
   const rows = total
     ? await db.select(ADMIN_NOVEL_SLIM).from(schema.novels).where(where)
         .orderBy(sql`${schema.novels.createdAt} DESC, ${schema.novels.id} ASC`)

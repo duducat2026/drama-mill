@@ -116,12 +116,41 @@ app.route('/api/v1', api)
 // 静态素材分发：images/videos/merged/uploads 四个分类各自可外置目录，
 // 由 resolveStaticFile 按前缀映射；对外的相对路径 static/xxx/... 保持不变，前端零改动。
 // 文件名带 uuid、内容不可变 → 打 immutable 长缓存；不挂鉴权，否则 <img>/<video> 标签加载失败
+// 支持 Range（206 分段）：<video preload="metadata"> 只需头部几 KB，无 Range 支持会整片全量下载
 app.get('/static/*', async (c) => {
   const resolved = resolveStaticFile(c.req.path)
   if (!resolved) return c.notFound()
-  c.header('Content-Type', resolved.contentType)
+  const { abs, contentType } = resolved
+  let size: number
+  try {
+    size = (await fs.promises.stat(abs)).size
+  } catch {
+    return c.notFound()
+  }
+  c.header('Content-Type', contentType)
   c.header('Cache-Control', 'public, max-age=31536000, immutable')
-  return c.body(fs.createReadStream(resolved.abs) as any)
+  c.header('Accept-Ranges', 'bytes')
+
+  const m = /^bytes=(\d*)-(\d*)$/.exec(c.req.header('Range') || '')
+  if (m && (m[1] || m[2])) {
+    let start = 0
+    let end = size - 1
+    if (m[1]) {
+      start = Number(m[1])
+      if (m[2]) end = Math.min(Number(m[2]), size - 1)
+    } else {
+      start = Math.max(0, size - Number(m[2])) // 后缀区间 bytes=-N
+    }
+    if (start > end || start >= size) {
+      c.header('Content-Range', `bytes */${size}`)
+      return c.body(null, 416)
+    }
+    c.header('Content-Range', `bytes ${start}-${end}/${size}`)
+    c.header('Content-Length', String(end - start + 1))
+    return c.body(fs.createReadStream(abs, { start, end }) as any, 206)
+  }
+  c.header('Content-Length', String(size))
+  return c.body(fs.createReadStream(abs) as any)
 })
 
 // 前端生产构建产物（Nuxt static）：

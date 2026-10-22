@@ -17,15 +17,14 @@
  */
 
 import { Hono } from 'hono'
-import { CatalogUnavailable, catalogStats, importCatalogPrices, listCatalogModels, listCatalogPrices, pricesOfModel } from '../../services/model-catalog.js'
+import { CatalogUnavailable, batchDeleteCatalogPrices, catalogStats, listCatalogPrices } from '../../services/model-catalog.js'
 import { badRequest, success } from '../../utils/response.js'
-import { pageOf } from './shared.js'
 
 const app = new Hono()
 
 // ─── 11b. 模型目录价（平台侧：主库 model_catalog_* 表，目录数据由部署期迁移脚本收编自主库） ───
 
-/** 目录价分页参数：复用通用 pageOf，page_size 上限放宽到 100（目录清单字段多） */
+/** 目录价分页参数：独立于通用 pageOf，page_size 上限放宽到 100（价格列表字段多） */
 function catalogPageOf(c: any): { page: number; pageSize: number } {
   const page = Math.max(1, Number(c.req.query('page')) || 1)
   const pageSize = Math.min(100, Math.max(1, Number(c.req.query('page_size')) || 20))
@@ -44,24 +43,6 @@ function catalogError(c: any, err: any) {
 app.get('/model-catalog/stats', async (c) => {
   try {
     return success(c, await catalogStats())
-  } catch (err) {
-    return catalogError(c, err)
-  }
-})
-
-// GET /admin/model-catalog/models?keyword=&provider=&source=&offline=&page= — 模型清单
-app.get('/model-catalog/models', async (c) => {
-  const { page, pageSize } = catalogPageOf(c)
-  try {
-    const data = await listCatalogModels({
-      keyword: (c.req.query('keyword') || '').trim(),
-      provider: (c.req.query('provider') || '').trim(),
-      source: (c.req.query('source') || '').trim(),
-      offline: c.req.query('offline') || '',
-      page,
-      pageSize,
-    })
-    return success(c, data)
   } catch (err) {
     return catalogError(c, err)
   }
@@ -86,25 +67,16 @@ app.get('/model-catalog/prices', async (c) => {
   }
 })
 
-// GET /admin/model-catalog/prices-of?model_id= — 单模型全部价格明细（模型清单行内展开）
-app.get('/model-catalog/prices-of', async (c) => {
-  const modelId = (c.req.query('model_id') || '').trim()
-  if (!modelId) return badRequest(c, 'model_id 必填')
-  try {
-    return success(c, await pricesOfModel(modelId))
-  } catch (err) {
-    return catalogError(c, err)
-  }
-})
-
-// POST /admin/model-catalog/import — 将目录价导入平台刊例价（仅含价格模型 / 只补空缺 / USD 折算）
-// body: { usd_rate?: number, dry_run?: boolean }；dry_run 仅返回导入预览
-app.post('/model-catalog/import', async (c) => {
+// POST /admin/model-catalog/batch-delete — 批量删除目录价格条目（目录价即刊例价，删除即退出计价）
+// body: { ids: number[] }；单次上限 1000 条
+app.post('/model-catalog/batch-delete', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const rawRate = Number(body.usd_rate)
-  const usdRate = Number.isFinite(rawRate) && rawRate > 0 ? rawRate : undefined
+  const ids: number[] = [...new Set<number>((Array.isArray(body?.ids) ? body.ids : [])
+    .map((n: unknown) => Number(n)).filter((n: number) => Number.isInteger(n) && n > 0))]
+  if (!ids.length) return badRequest(c, 'ids 必须为正整数数组')
+  if (ids.length > 1000) return badRequest(c, '单次最多删除 1000 条')
   try {
-    return success(c, await importCatalogPrices({ usdRate, dryRun: body.dry_run === true || body.dry_run === 1 }))
+    return success(c, await batchDeleteCatalogPrices(ids))
   } catch (err) {
     return catalogError(c, err)
   }

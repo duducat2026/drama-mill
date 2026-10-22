@@ -39,6 +39,7 @@
           <span class="admin-user-name">{{ user?.nickname || user?.username }}</span>
           <span class="admin-user-role">管理员</span>
         </div>
+        <NuxtLink to="/" class="btn btn-sm btn-ghost">← 回到短剧工坊</NuxtLink>
         <button class="btn btn-sm" @click="logout()">退出登录</button>
       </div>
     </aside>

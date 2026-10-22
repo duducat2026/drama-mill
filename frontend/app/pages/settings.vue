@@ -80,6 +80,7 @@ import { useSettingsPage } from '~/composables/settings/useSettingsPage'
 
 // 列表与独立表单复用配置逻辑，路径变化时重建页面，查询参数切换 Tab 不重建。
 definePageMeta({ key: route => route.path })
+// id 顺序与 useSettingsPage 的 SETTINGS_TAB_IDS 保持一致（tab 已进 URL，测试做等值校验）
 const baseTabs = [
   { id: 'ai', label: 'AI 服务', icon: Cpu },
   { id: 'prices', label: '模型价格', icon: Coins },

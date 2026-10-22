@@ -18,10 +18,11 @@
 
 import { Hono } from 'hono'
 import { db, schema } from '../../db/index.js'
-import { success } from '../../utils/response.js'
+import { badRequest, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
 import { and, count, desc, eq, gte, inArray, isNull, like, lte, or } from 'drizzle-orm'
-import { pageOf } from './shared.js'
+import { pageOf, tooDeep } from './shared.js'
+import { cachedTotal, countKey } from './count-cache.js'
 
 const app = new Hono()
 
@@ -30,30 +31,42 @@ const app = new Hono()
 // GET /admin/merges?user_id=&keyword=&from=&to=&page=
 app.get('/merges', async (c) => {
   const { page, pageSize } = pageOf(c)
+  if (tooDeep(page, pageSize)) return badRequest(c, '翻页过深，请用用户/日期/关键词过滤后查询')
   const userId = Number(c.req.query('user_id')) || undefined
   const keyword = (c.req.query('keyword') || '').trim()
   const from = c.req.query('from')
   const to = c.req.query('to')
 
-  // 软删/用户/日期/keyword 与排序分页全部下推 SQL（scenes 为 TEXT，仅返回当页）
-  const conds = [isNull(schema.videoMerges.deletedAt)]
-  if (userId) conds.push(eq(schema.videoMerges.userId, userId))
-  if (from) conds.push(gte(schema.videoMerges.createdAt, from))
-  if (to) conds.push(lte(schema.videoMerges.createdAt, `${to}\uFFFF`))
+  // 软删/用户/日期/keyword 与排序分页全部下推 SQL；scenes（分镜 JSON 大字段）与 deletedAt 不选取
+  const VM = schema.videoMerges
+  const cols = {
+    id: VM.id, episodeId: VM.episodeId, dramaId: VM.dramaId, title: VM.title,
+    provider: VM.provider, model: VM.model, status: VM.status, mergedUrl: VM.mergedUrl,
+    duration: VM.duration, taskId: VM.taskId, errorMsg: VM.errorMsg, userId: VM.userId,
+    createdAt: VM.createdAt, completedAt: VM.completedAt,
+  }
+  const conds = [isNull(VM.deletedAt)]
+  if (userId) conds.push(eq(VM.userId, userId))
+  if (from) conds.push(gte(VM.createdAt, from))
+  if (to) conds.push(lte(VM.createdAt, `${to}\uFFFF`))
   if (keyword) {
     const kw = `%${keyword}%`
     const titleDramaIds = (await db.select({ id: schema.dramas.id }).from(schema.dramas).where(like(schema.dramas.title, kw))).map(d => d.id)
     conds.push(or(
-      like(schema.videoMerges.title, kw),
-      titleDramaIds.length ? inArray(schema.videoMerges.dramaId, titleDramaIds) : undefined,
+      like(VM.title, kw),
+      titleDramaIds.length ? inArray(VM.dramaId, titleDramaIds) : undefined,
     )!)
   }
   const where = and(...conds)
-  const [rows, totalRow] = await Promise.all([
-    db.select().from(schema.videoMerges).where(where)
-      .orderBy(desc(schema.videoMerges.createdAt), desc(schema.videoMerges.id))
+  const [rows, total] = await Promise.all([
+    db.select(cols).from(VM).where(where)
+      .orderBy(desc(VM.createdAt), desc(VM.id))
       .limit(pageSize).offset((page - 1) * pageSize),
-    db.select({ c: count() }).from(schema.videoMerges).where(where),
+    // COUNT(*) 缓存 60s（对齐 videos/storyboards 治理）：key 覆盖全部影响行数的过滤条件
+    cachedTotal(countKey('admin:merges', userId, keyword, from, to), async () => {
+      const [r] = await db.select({ c: count() }).from(VM).where(where)
+      return Number(r?.c) || 0
+    }),
   ])
 
   const uidSet = [...new Set(rows.map(m => m.userId).filter((v): v is number => !!v))]
@@ -66,7 +79,7 @@ app.get('/merges', async (c) => {
     : new Map<number, string>()
 
   return success(c, {
-    total: Number(totalRow[0]?.c) || 0,
+    total,
     page,
     page_size: pageSize,
     items: rows.map(m => ({

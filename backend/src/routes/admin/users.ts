@@ -22,8 +22,8 @@ import { hashPassword } from '../../services/auth.js'
 import { getUserUsageBytes, quotaOf } from '../../services/storage-quota.js'
 import { badRequest, notFound, now, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
-import { eq } from 'drizzle-orm'
-import { pageOf, paged } from './shared.js'
+import { and, count, desc, eq, like, or } from 'drizzle-orm'
+import { pageOf } from './shared.js'
 
 const app = new Hono()
 
@@ -32,12 +32,20 @@ const app = new Hono()
 // GET /admin/users?keyword=&status=&page=
 app.get('/users', async (c) => {
   const { page, pageSize } = pageOf(c)
-  const keyword = (c.req.query('keyword') || '').trim().toLowerCase()
+  const keyword = (c.req.query('keyword') || '').trim()
   const status = c.req.query('status')
-  let rows = await db.select().from(schema.users)
-  if (keyword) rows = rows.filter(u => u.username.toLowerCase().includes(keyword) || (u.nickname || '').toLowerCase().includes(keyword))
-  if (status) rows = rows.filter(u => u.status === status)
-  rows.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  // 过滤/排序/分页下推 SQL（utf8mb4_unicode_ci 下 LIKE 天然大小写不敏感）；
+  // 存储用量是磁盘遍历，只对当页用户计算，不再全表用户先算后用
+  const conds = []
+  if (keyword) conds.push(or(like(schema.users.username, `%${keyword}%`), like(schema.users.nickname, `%${keyword}%`)))
+  if (status) conds.push(eq(schema.users.status, status))
+  const where = conds.length ? and(...conds) : undefined
+  const [rows, totalRow] = await Promise.all([
+    db.select().from(schema.users).where(where)
+      .orderBy(desc(schema.users.createdAt), desc(schema.users.id))
+      .limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ c: count() }).from(schema.users).where(where),
+  ])
   // 存储用量/配额（用量走 60s TTL 缓存，与存储监控/运行监控共享探测结果）
   const withUsage = await Promise.all(rows.map(async u => ({
     ...toSnakeCase({ ...u, passwordHash: undefined }),
@@ -46,7 +54,12 @@ app.get('/users', async (c) => {
     storage_quota_custom: u.storageQuotaBytes != null && u.storageQuotaBytes > 0,
   })))
   for (const r of withUsage as any[]) r.storage_exceeded = r.storage_usage_bytes > r.storage_quota_bytes
-  return success(c, paged(withUsage, page, pageSize))
+  return success(c, {
+    total: Number(totalRow[0]?.c) || 0,
+    page,
+    page_size: pageSize,
+    items: withUsage,
+  })
 })
 
 // POST /admin/users — 新增账号（用户名唯一）

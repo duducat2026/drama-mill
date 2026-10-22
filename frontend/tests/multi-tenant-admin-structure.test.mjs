@@ -24,8 +24,16 @@ test('useAuth exposes session state and token persistence', () => {
 test('login page submits credentials via useAuth', () => {
   assert.match(loginPage, /v-model="username"/)
   assert.match(loginPage, /v-model="password"/)
-  assert.match(loginPage, /const \{ login, isLoggedIn \} = useAuth\(\)/)
+  assert.match(loginPage, /const \{ login, isLoggedIn, user, fetchMe \} = useAuth\(\)/)
   assert.match(loginPage, /await login\(username\.value\.trim\(\), password\.value\)/)
+})
+
+test('管理员登录直达管理后台，后台侧栏可回到短剧工坊', () => {
+  // 登录页按角色分流：admin → /admin/panel，普通用户 → 短剧工坊首页
+  assert.match(loginPage, /navigateTo\(me\?\.role === 'admin' \? '\/admin\/panel' : '\/'\)/)
+  // 管理后台侧栏底部提供回跳入口（与退出登录并列）
+  const adminLayout = read('app/layouts/admin.vue')
+  assert.match(adminLayout, /<NuxtLink to="\/" class="btn btn-sm btn-ghost">← 回到短剧工坊<\/NuxtLink>/)
 })
 
 test('home page guards login and exposes admin entry', () => {
@@ -59,20 +67,22 @@ test('ten admin pages exist and share the admin layout', () => {
     assert.match(page, /definePageMeta\(\{ layout: 'admin' \}\)/, `${path} must use admin layout`)
   }
   assert.ok(existsSync(new URL('app/layouts/admin.vue', root)), 'missing admin layout')
-  // 管理 API 客户端覆盖用户 / 网关 / 审计 / 面板 / 成本 / 刊例价
+  // 管理 API 客户端覆盖用户 / 网关 / 审计 / 面板 / 成本 / 目录价批量删除
   assert.match(useApi, /adminAPI = \{/)
   assert.match(useApi, /adminAPI[\s\S]*?panel/)
   assert.match(useApi, /adminAPI[\s\S]*?costs/)
   assert.match(useApi, /adminAPI[\s\S]*?audit/)
-  assert.match(useApi, /adminAPI[\s\S]*?ModelPrice/)
+  assert.match(useApi, /adminAPI[\s\S]*?modelCatalogBatchDelete/)
 })
 
-test('admin costs page manages price sheet and aggregates', () => {
+test('admin costs page aggregates only (price sheet merged into model-catalog page)', () => {
   const page = read('app/pages/admin/costs.vue')
   assert.match(page, /adminAPI\.costs/)
   assert.match(page, /by_service_type/)
   assert.match(page, /by_drama/)
-  assert.match(page, /model-prices|ModelPrice/)
+  // 刊例价维护已整合到「模型目录价」页：成本页不再出现价格编辑与刊例价区块
+  assert.doesNotMatch(page, /openPriceForm|新增价格|模型刊例价<\/div>/)
+  assert.match(page, /模型刊例价维护已整合到「模型目录价」页/)
 })
 
 test('admin panel page polls gateway rate stats', () => {

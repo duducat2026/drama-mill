@@ -43,7 +43,8 @@ app.get('/storyboards', async (c) => {
     isNull(S.deletedAt),
     userId ? eq(D.userId, userId) : undefined,
     dramaId ? eq(E.dramaId, dramaId) : undefined,
-    keyword ? or(like(D.title, `%${keyword}%`), like(S.title, `%${keyword}%`), like(S.videoPrompt, `%${keyword}%`)) : undefined,
+    // keyword 只对短列模糊：剔除 videoPrompt 大字段 LIKE（TEXT 全扫是千万级下检索慢的主因）
+    keyword ? or(like(D.title, `%${keyword}%`), like(S.title, `%${keyword}%`)) : undefined,
   )
   const cols = {
     id: S.id, storyboardNumber: S.storyboardNumber, title: S.title, videoPrompt: S.videoPrompt,

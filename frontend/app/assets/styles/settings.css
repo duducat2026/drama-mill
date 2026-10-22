@@ -46,13 +46,15 @@
 }
 
 .settings-content { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
-.settings-scroll { height: 100%; overflow-y: auto; padding: 24px 40px 48px; max-width: 840px; margin: 0 auto; animation: fadeUp 0.3s var(--ease-out); }
+/* 设置中心各面板共用的宽栏基线：840 会把价目行、风格行挤成「名靠左、控件靠右、中间大片死白」，
+   长提示词还要被 truncate 掐短。宽度只在此处定义一次——scoped 样式表跨文件覆写同特异性类
+   （如 .prices-scroll）注入顺序不可控，实测会被这里的 840 压过而静默失效。 */
+.settings-scroll { height: 100%; overflow-y: auto; padding: 24px 40px 48px; max-width: 1160px; margin: 0 auto; animation: fadeUp 0.3s var(--ease-out); }
 .settings-head { margin-bottom: 20px; }
 .settings-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .settings-desc { font-size: 13px; color: var(--text-2); margin-top: 6px; }
 
 /* AI 配置：三类能力独立浏览，整页表单保留常驻操作栏。 */
-.ai-settings-scroll { max-width: 1160px; }
 .service-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin: 24px 0 20px; }
 .service-tab {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;

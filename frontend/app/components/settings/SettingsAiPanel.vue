@@ -8,7 +8,7 @@
 -->
 
 <template>
-  <div class="settings-scroll ai-settings-scroll">
+  <div class="settings-scroll">
     <div class="settings-head">
       <h2 class="settings-title">AI 服务配置</h2>
       <p class="settings-desc">按服务类型管理模型与密钥。添加或编辑配置将在独立页面中进行。</p>

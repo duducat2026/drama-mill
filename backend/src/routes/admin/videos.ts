@@ -23,7 +23,7 @@ import { ABANDONED_RETRY_COUNT, AUTO_RETRY_HARD_MAX, getAutoRetryMax, isAbandone
 import { GEN_TASK_AUTO_RETRY_MAX } from '../../utils/rate-config.js'
 import { badRequest, notFound, now, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
-import { and, count, desc, eq, inArray, like, or } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNotNull, like, or } from 'drizzle-orm'
 import { pageOf, tooDeep, userMap } from './shared.js'
 import { cachedTotal, countKey } from './count-cache.js'
 
@@ -33,6 +33,8 @@ const app = new Hono()
 
 /** 一键重提批量上限：历史失败可能很多，重提走生成队列受闸门约束，仍限量防一次性灌满队列 */
 const BULK_RETRY_CAP = 100
+/** 一键重提 SQL 扫描窗口：只取最近 N 条失败任务进内存过滤放弃标记，禁止全表载入 */
+const BULK_RETRY_SCAN_LIMIT = BULK_RETRY_CAP * 5
 
 // GET /admin/task-retry-config — 单任务失败自动重提上限（运行时配置优先，回退环境变量默认）
 app.get('/task-retry-config', async (c) => {
@@ -57,12 +59,14 @@ app.put('/task-retry-config', async (c) => {
 
 // POST /admin/videos/retry-failed — 一键重提失败的视频任务（最近优先，上限 BULK_RETRY_CAP 条）
 app.post('/videos/retry-failed', async (c) => {
-  let rows = await db.select().from(schema.sysTask)
-  rows = rows.filter(t => t.type === 'video' && t.status === 'failed')
+  // type/status 过滤与 updated_at 排序下推 SQL + 限量窗口：sys_task 全库最大表，禁止全表载入内存
+  const where = and(eq(schema.sysTask.type, 'video'), eq(schema.sysTask.status, 'failed'))
+  const fetched = await db.select({ id: schema.sysTask.id, retryCount: schema.sysTask.retryCount })
+    .from(schema.sysTask).where(where)
+    .orderBy(desc(schema.sysTask.updatedAt)).limit(BULK_RETRY_SCAN_LIMIT)
   // 人工放弃的任务不参与一键重提（需先逐个复活，避免无法处理的任务被反复提交）
-  const abandoned = rows.filter(t => isAbandonedTask(t.retryCount)).length
-  rows = rows.filter(t => !isAbandonedTask(t.retryCount))
-  rows.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+  const abandoned = fetched.filter(t => isAbandonedTask(t.retryCount)).length
+  const rows = fetched.filter(t => !isAbandonedTask(t.retryCount))
   const targets = rows.slice(0, BULK_RETRY_CAP)
   let retried = 0
   const skipped: number[] = []
@@ -74,7 +78,8 @@ app.post('/videos/retry-failed', async (c) => {
       skipped.push(t.id)
     }
   }
-  return success(c, { retried, skipped: skipped.length, abandoned, total_failed: rows.length + abandoned })
+  const [cnt] = await db.select({ c: count() }).from(schema.sysTask).where(where)
+  return success(c, { retried, skipped: skipped.length, abandoned, total_failed: Number(cnt?.c) || 0 })
 })
 
 // POST /admin/videos/:id/retry — 重提单个失败任务（手动重试重置重试计数）
@@ -125,10 +130,11 @@ const HISTORICAL_RESCUE_CAP = 500
 // POST /admin/videos/rescue-historical — 历史任务补跑：探测带上游 task_id 的失败视频任务，
 // 上游已生成完→直接救回落库，仍在生成→恢复轮询；均不重新提交、不消耗重试额度（避免重复计费）
 app.post('/videos/rescue-historical', async (c) => {
-  let rows = await db.select().from(schema.sysTask)
-  rows = rows.filter(t => t.type === 'video' && t.status === 'failed' && !!t.taskId)
-  rows.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-  const targets = rows.slice(0, HISTORICAL_RESCUE_CAP)
+  // 与 retry-failed 同口径下推 SQL：失败 + 带上游 task_id + 最近优先，限量窗口防全表载入
+  const where = and(eq(schema.sysTask.type, 'video'), eq(schema.sysTask.status, 'failed'), isNotNull(schema.sysTask.taskId))
+  const targets = await db.select({ id: schema.sysTask.id })
+    .from(schema.sysTask).where(where)
+    .orderBy(desc(schema.sysTask.updatedAt)).limit(HISTORICAL_RESCUE_CAP)
 
   let rescued = 0, resumed = 0
   const skipped: number[] = []
@@ -148,7 +154,8 @@ app.post('/videos/rescue-historical', async (c) => {
       else skipped.push(batch[j].id)
     })
   }
-  return success(c, { probed: targets.length, rescued, resumed, skipped: skipped.length, total_eligible: rows.length })
+  const [cnt] = await db.select({ c: count() }).from(schema.sysTask).where(where)
+  return success(c, { probed: targets.length, rescued, resumed, skipped: skipped.length, total_eligible: Number(cnt?.c) || 0 })
 })
 
 // GET /admin/videos?user_id=&drama_id=&status=&keyword=&page=

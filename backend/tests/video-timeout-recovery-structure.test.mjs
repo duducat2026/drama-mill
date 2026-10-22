@@ -78,11 +78,11 @@ test('admin：失败任务一键重提与单任务重提接口', () => {
   assert.match(src, /BULK_RETRY_CAP/)
   assert.match(src, /rows\.slice\(0, BULK_RETRY_CAP\)/)
   assert.match(src, /retryTask/)
-  // 历史任务补跑接口：只探测带 task_id 的失败任务，限量小批并发，救回不重提
+  // 历史任务补跑接口：只探测带 task_id 的失败任务（过滤/排序/限量已下推 SQL），小批并发，救回不重提
   assert.match(src, /app\.post\('\/videos\/rescue-historical'/)
   assert.match(src, /HISTORICAL_RESCUE_CAP/)
   assert.match(src, /probeHistoricalTask\(t\.id\)/)
-  assert.match(src, /t\.status === 'failed' && !!t\.taskId/)
+  assert.match(src, /eq\(schema\.sysTask\.status, 'failed'\), isNotNull\(schema\.sysTask\.taskId\)/)
 })
 
 test('index：启动时挂上失败自动恢复看门狗', () => {

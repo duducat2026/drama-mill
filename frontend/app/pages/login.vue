@@ -73,7 +73,7 @@ import { Eye, EyeOff } from 'lucide-vue-next'
 definePageMeta({ layout: false })
 
 const showBrandImage = ref(true)
-const { login, isLoggedIn } = useAuth()
+const { login, isLoggedIn, user, fetchMe } = useAuth()
 const username = ref('')
 const password = ref('')
 // 密码明文/密文切换（仅影响输入框显示，不改变提交值）
@@ -81,9 +81,11 @@ const showPassword = ref(false)
 const error = ref('')
 const loading = ref(false)
 
-// 已登录直接进首页
-onMounted(() => {
-  if (isLoggedIn.value) navigateTo('/')
+// 已登录直接进对应工作区：管理员进管理后台，普通用户回短剧工坊
+onMounted(async () => {
+  if (!isLoggedIn.value) return
+  const me = user.value || await fetchMe()
+  navigateTo(me?.role === 'admin' ? '/admin/panel' : '/')
 })
 
 async function submit() {
@@ -91,8 +93,8 @@ async function submit() {
   loading.value = true
   error.value = ''
   try {
-    await login(username.value.trim(), password.value)
-    navigateTo('/')
+    const me = await login(username.value.trim(), password.value)
+    navigateTo(me?.role === 'admin' ? '/admin/panel' : '/')
   } catch (e: any) {
     error.value = e?.message || '登录失败'
   } finally {

@@ -91,9 +91,11 @@ async function load(p = 1) {
   total.value = data.total
 }
 
-onMounted(async () => {
-  const users = await adminAPI.users({ page: 1, page_size: 200 })
-  userOptions.value = users.items
+onMounted(() => {
+  // 用户下拉与列表并行：串行 await 会给首屏多挡一个往返
+  adminAPI.users({ page: 1, page_size: 200 })
+    .then(users => { userOptions.value = users.items })
+    .catch(() => { /* 用户列表失败不阻断列表加载 */ })
   load(1)
 })
 </script>

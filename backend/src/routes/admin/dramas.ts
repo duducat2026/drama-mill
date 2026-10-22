@@ -18,10 +18,11 @@
 
 import { Hono } from 'hono'
 import { db, schema } from '../../db/index.js'
-import { notFound, success } from '../../utils/response.js'
+import { badRequest, notFound, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
 import { and, count, desc, eq, gte, inArray, isNull, like, lte, or } from 'drizzle-orm'
-import { pageOf } from './shared.js'
+import { pageOf, tooDeep } from './shared.js'
+import { cachedTotal, countKey } from './count-cache.js'
 
 const app = new Hono()
 
@@ -30,6 +31,7 @@ const app = new Hono()
 // GET /admin/dramas?user_id=&keyword=&from=&to=&page=
 app.get('/dramas', async (c) => {
   const { page, pageSize } = pageOf(c)
+  if (tooDeep(page, pageSize)) return badRequest(c, '翻页过深，请用用户/关键词/日期过滤后查询')
   const userId = Number(c.req.query('user_id')) || undefined
   const keyword = (c.req.query('keyword') || '').trim()
   const from = c.req.query('from')
@@ -43,9 +45,13 @@ app.get('/dramas', async (c) => {
   if (from) conds.push(gte(DR.createdAt, from))
   if (to) conds.push(lte(DR.createdAt, `${to}\uFFFF`))
   const where = and(...conds)
-  const [rows, totalRow] = await Promise.all([
+  const [rows, total] = await Promise.all([
     db.select().from(DR).where(where).orderBy(desc(DR.createdAt), desc(DR.id)).limit(pageSize).offset((page - 1) * pageSize),
-    db.select({ c: count() }).from(DR).where(where),
+    // COUNT 缓存 60s + 并发去重（对齐四列表深页治理口径）
+    cachedTotal(countKey('admin:dramas', userId, keyword, from, to), async () => {
+      const [r] = await db.select({ c: count() }).from(DR).where(where)
+      return Number(r?.c) || 0
+    }),
   ])
 
   const dramaIds = rows.map(d => d.id)
@@ -60,7 +66,7 @@ app.get('/dramas', async (c) => {
     : new Map<number, string>()
 
   return success(c, {
-    total: Number(totalRow[0]?.c) || 0,
+    total,
     page,
     page_size: pageSize,
     items: rows.map(d => ({

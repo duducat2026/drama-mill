@@ -97,7 +97,7 @@ test('admin routes expose the 11 management capabilities', () => {
   assert.match(adminRoutes, /adminGuard/)
   assert.match(adminRoutes, /function paged/)
   assert.match(adminRoutes, /maskApiKey/)
-  // 用户管理 / 资产 / AI 配置 / 审计 / 生产面板 / 成本 / 刊例价
+  // 用户管理 / 资产 / AI 配置 / 审计 / 生产面板 / 成本 / 模型目录价（刊例价不再单独维护）
   assert.match(adminRoutes, /app\.get\('\/users'/)
   assert.match(adminRoutes, /app\.post\('\/users'/)
   assert.match(adminRoutes, /app\.get\('\/assets'/)
@@ -105,7 +105,7 @@ test('admin routes expose the 11 management capabilities', () => {
   assert.match(adminRoutes, /app\.get\('\/audit'/)
   assert.match(adminRoutes, /app\.get\('\/panel'/)
   assert.match(adminRoutes, /app\.get\('\/costs'/)
-  assert.match(adminRoutes, /app\.get\('\/model-prices'/)
+  assert.match(adminRoutes, /app\.get\('\/model-catalog\/stats'/)
   // 平台内容查看
   assert.match(adminRoutes, /app\.get\('\/dramas'/)
   assert.match(adminRoutes, /app\.get\('\/storyboards'/)

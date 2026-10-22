@@ -26,7 +26,7 @@
           <span class="mono cfg-price-model">{{ m }}</span>
           <template v-if="priceOf(m)">
             <span class="cfg-price-val">{{ fmtPrice(priceOf(m)) }}</span>
-            <span :class="['tag', priceOf(m).source === 'platform' ? 'tag-accent' : 'tag-success']">{{ priceOf(m).source === 'platform' ? '平台导入' : '自定义' }}</span>
+            <span :class="['tag', priceOf(m).source === 'platform' ? 'tag-accent' : 'tag-success']">{{ priceOf(m).source === 'platform' ? '平台目录' : '自定义' }}</span>
           </template>
           <span v-else-if="platformBase[m]" class="dim cfg-price-val">基准 {{ fmtPrice(platformBase[m]) }} · 未绑定</span>
           <span v-else-if="checked[m]" class="tag tag-error">计价缺口</span>
@@ -62,7 +62,7 @@
 <script setup>
 import { toast } from 'vue-sonner'
 import { userModelPriceAPI } from '~/composables/useApi'
-import { useUserPrices, BILLING_BY_SERVICE, BILLING_LABELS } from '~/composables/settings/useUserPrices'
+import { useUserPrices, BILLING_BY_SERVICE, BILLING_LABELS, fmtMoney } from '~/composables/settings/useUserPrices'
 import BaseSelect from '~/components/BaseSelect.vue'
 
 const props = defineProps({
@@ -77,8 +77,8 @@ const models = computed(() => [...new Set((props.modelStr || '').split(/[,，\s]
 const billingOptions = Object.entries(BILLING_LABELS).map(([value, label]) => ({ value, label }))
 
 function fmtPrice(p) {
-  if (p.billing_type === 'token') return `入 ${p.input_price} / 出 ${p.output_price} 元/百万Token`
-  return `${p.unit_price} ${p.billing_type === 'image' ? '元/张' : '元/秒'}`
+  if (p.billing_type === 'token') return `入 ${fmtMoney(p.input_price)} / 出 ${fmtMoney(p.output_price)} 元/百万Token`
+  return `${fmtMoney(p.unit_price)} ${p.billing_type === 'image' ? '元/张' : '元/秒'}`
 }
 
 /* 未绑定模型 → 平台基准价核对（结果缓存；服务类型切换即失效） */

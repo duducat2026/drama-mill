@@ -11,12 +11,35 @@ import { useConfigEditor } from './useConfigEditor'
 import { useGenerateTest } from './useGenerateTest'
 import { useStylePresets } from './useStylePresets'
 
+// ===== 基础面板导航：tab 落在 URL query（?tab=）上 =====
+// 与既有 ?service= 同一套参数化导航：刷新、前进后退、复制链接都能停在当前面板，
+// 不再总被弹回 AI 服务。'ai' 是默认面板，不写进 URL，旧链接 /settings 保持干净。
+// 面板清单与 settings.vue 的 baseTabs 必须一致，由设置页导航测试做等值校验防漂移。
+export const SETTINGS_TAB_IDS = ['ai', 'prices', 'watchdogs', 'styles']
+const DEFAULT_TAB = 'ai'
+
+function withTabQuery(query, id) {
+  const next = { ...query }
+  if (id === DEFAULT_TAB) delete next.tab
+  else next.tab = id
+  return next
+}
+
 export function useSettingsPage() {
+  const route = useRoute()
+  const router = useRouter()
   const cfgApi = useAiConfigs()
   const editor = useConfigEditor(cfgApi)
   const styles = useStylePresets()
 
-  const tab = ref('ai')
+  // getter/setter 形式：模板里 `tab = t.id` 照常可用，URL 始终是唯一数据源
+  const tab = computed({
+    get: () => (SETTINGS_TAB_IDS.includes(route.query.tab) ? route.query.tab : DEFAULT_TAB),
+    set: (id) => {
+      if (route.query.tab === (id === DEFAULT_TAB ? undefined : id)) return
+      router.push({ path: route.path, query: withTabQuery(route.query, id) })
+    },
+  })
   const cfgPage = computed(() => cfgApi.route.name === 'ai-config-editor')
 
   // ===== 模型调用总开关（用户侧）=====

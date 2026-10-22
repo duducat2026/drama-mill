@@ -52,16 +52,11 @@ export const adminAPI = {
   // user_id 指定时加载该用户的视频配置（模型 + API-KEY）查询
   cloudQueue: (params?: { model?: string; config_id?: number; user_id?: number }) => api.get(`/admin/cloud-queue${adminQuery(params)}`),
   costs: (params?: any) => api.get(`/admin/costs${adminQuery(params)}`),
-  modelPrices: (params?: any) => api.get(`/admin/model-prices${adminQuery(params)}`),
-  createModelPrice: (d: any) => api.post('/admin/model-prices', d),
-  updateModelPrice: (id: number, d: any) => api.put(`/admin/model-prices/${id}`, d),
-  // 模型目录价（平台侧：读取主库目录表 model_catalog_*，由部署期迁移脚本从采集库收编）
+  // 模型目录价（平台侧：读取主库目录表 model_catalog_*，目录价即刊例价，AI 成本计价实时依托）
   modelCatalogStats: () => api.get('/admin/model-catalog/stats'),
-  modelCatalogModels: (params?: any) => api.get(`/admin/model-catalog/models${adminQuery(params)}`),
   modelCatalogPrices: (params?: any) => api.get(`/admin/model-catalog/prices${adminQuery(params)}`),
-  modelCatalogPricesOf: (modelId: string) => api.get(`/admin/model-catalog/prices-of?model_id=${encodeURIComponent(modelId)}`),
-  // 将目录价导入平台刊例价：dry_run 预览，否则正式写入
-  importModelCatalog: (d: { usd_rate?: number; dry_run?: boolean }) => api.post('/admin/model-catalog/import', d),
+  // 批量删除目录价格条目：删行即从计价中退出（无独立刊例价表维护）
+  modelCatalogBatchDelete: (ids: number[]) => api.post('/admin/model-catalog/batch-delete', { ids }),
   // 平台小说管理：按用户名/小说名/创建日期范围检索
   novels: (params?: { username?: string; keyword?: string; from?: string; to?: string; page?: number; page_size?: number }) => api.get(`/admin/novels${adminQuery(params)}`),
   novelContent: (id: number) => api.get(`/admin/novels/${id}/content`),

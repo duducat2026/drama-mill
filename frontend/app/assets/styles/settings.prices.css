@@ -1,0 +1,203 @@
+/**
+ * Drama Mill — 用户「模型价格」面板样式：价目单（tariff sheet）式排布
+ * 由 SettingsPricesPanel.vue 与 SettingsPricesImportDialog.vue 各自 <style scoped src> 挂载，
+ * 组件内部元素因此都能命中自身 scope，不依赖父页穿透。
+ */
+
+/* 栏宽由 settings.css 的 .settings-scroll 统一给出（与 AI 服务面板同级），此处不再覆写。 */
+
+/* ─── 卡头工具条：标题 / 计数筛选 / 操作同一行，下边框与价目区分区 ───
+   左右内边距与 .price-row 取同一组值（14 / 12），让卡头、节头、价目行落在同一条竖线上。 */
+.price-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
+  padding: 13px 12px 13px 14px; border-bottom: 1px solid var(--border);
+}
+.price-bar-title { font-size: 14px; font-weight: 700; color: var(--text-0); }
+.price-bar .price-filter { margin: 0; }
+.price-bar-ops { margin-left: auto; }
+/* 首个价目节与卡头之间留呼吸，其余节之间仍由 .price-sheet + .price-sheet 控制 */
+.price-bar + .price-sheet { margin-top: var(--sp-4, 14px); }
+/* 窄屏下标题/chips/操作各占一行：此时 margin-left: auto 只会把按钮推到行尾悬空，改为整行左对齐 */
+@media (max-width: 760px) {
+  .price-bar { gap: 8px; padding-top: 12px; padding-bottom: 12px; }
+  .price-bar-ops { margin-left: 0; width: 100%; }
+}
+
+/* ─── 模态筛选：控件即概览（pill 上带计数，取代统计行 + 筛选双控件重复） ─── */
+.price-filter { display: flex; flex-wrap: wrap; gap: var(--sp-2, 8px); margin: 0 0 var(--sp-5, 18px); }
+.price-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px 5px 13px; border-radius: var(--radius-pill, 980px);
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  background: transparent; color: var(--text-2, #6e6e73);
+  font-size: 12.5px; font-weight: 550; letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color 0.18s var(--ease-out), border-color 0.18s var(--ease-out), background 0.18s var(--ease-out);
+}
+.price-pill:hover { color: var(--text-0); border-color: var(--border-strong); }
+.price-pill.active { color: var(--accent, #0071e3); border-color: rgba(0, 113, 227, 0.38); background: var(--accent-bg); }
+.price-pill-count {
+  font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--text-3); background: var(--bg-2); border-radius: 5px; padding: 1px 5px; line-height: 1.5;
+}
+.price-pill.active .price-pill-count { color: var(--accent); background: rgba(0, 113, 227, 0.12); }
+
+/* ─── 价目节：一个模态一章，节头标注计价单位，彻底消除跨模态的空列 ─── */
+.price-sheet + .price-sheet { margin-top: var(--sp-6, 24px); }
+.price-sheet-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 0 12px 7px 14px; border-bottom: 1px solid var(--border);
+}
+.price-sheet-kicker {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-1);
+}
+.price-sheet-unit { font-size: 11.5px; color: var(--text-3); }
+.price-sheet-count {
+  margin-left: auto; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+
+.price-sheet-list { list-style: none; margin: 0; padding: 0; }
+.price-row {
+  position: relative; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 12px 9px 14px; border-bottom: 1px solid var(--border);
+  transition: background 0.16s var(--ease-out);
+}
+.price-row:last-child { border-bottom: none; }
+/* 悬停/聚焦时左侧浮出一道 accent 竖线：行定位反馈，不改变行高 */
+.price-row::before {
+  content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 0 2px 2px 0;
+  background: var(--accent); opacity: 0; transform: scaleY(0.5);
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+}
+.price-row:hover, .price-row:focus-within { background: var(--bg-hover); }
+.price-row:hover::before, .price-row:focus-within::before { opacity: 1; transform: none; }
+
+/* 名称列贴着文字收口（最多占一半行宽）：剩余宽度全部交给点引导线，
+   虚线才能从模型名一路牵到价目，而不是中间孤零零一截。 */
+.price-row-id { flex: 0 1 auto; min-width: 0; max-width: 55%; display: flex; flex-direction: column; gap: 2px; }
+.price-row-model { font-size: 13px; line-height: 1.35; color: var(--text-0); overflow-wrap: anywhere; }
+/* 厂商 + 来源同处一行：来源不再单占一列，窄屏时操作列就不会被挤到第二行 */
+.price-row-vendor { display: flex; align-items: center; gap: 7px; font-size: 11.5px; letter-spacing: 0.01em; color: var(--text-3); }
+.price-row-from { font-style: normal; display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); }
+.price-row-from::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: 0.5; }
+.price-row-from[data-src='manual'] { color: var(--accent-text); }
+.price-row-from[data-src='manual']::before { background: var(--accent); opacity: 1; }
+.price-row-leader {
+  flex: 1 1 40px; min-width: 18px; align-self: center;
+  border-bottom: 1px dotted var(--border-strong); opacity: 0.85;
+}
+
+/* 数字栏：等宽数字 + 右对齐，整列价格收束成一条竖线 */
+.price-row-fig {
+  flex: 0 0 auto; display: flex; align-items: baseline; justify-content: flex-end; gap: 5px;
+  min-width: 138px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.price-key { font-size: 11px; color: var(--text-3); }
+.price-num { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: var(--text-0); }
+.price-sep { font-size: 12px; color: var(--text-3); opacity: 0.55; }
+
+/* 操作：默认隐匿，hover / 键盘聚焦时滑入；触屏设备常显（无 hover 能力）。
+   宽度靠「每行都是同字数的两个按钮 + 不换行」保持恒定，从而不推歪数字列右边界。 */
+.price-row-ops {
+  flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 6px;
+  opacity: 0; transform: translateX(4px);
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+}
+.price-row:hover .price-row-ops, .price-row:focus-within .price-row-ops { opacity: 1; transform: none; }
+@media (hover: none) { .price-row-ops { opacity: 1; transform: none; } }
+.price-btn {
+  padding: 4px 12px; font-size: 12px; white-space: nowrap; border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong); background: var(--bg-1, #fff); color: var(--text-1);
+  cursor: pointer; transition: color 0.16s var(--ease-out), background 0.16s var(--ease-out), border-color 0.16s var(--ease-out);
+}
+.price-btn:hover { color: var(--text-0); background: var(--bg-2); }
+.price-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.price-btn-primary { border-color: rgba(0, 113, 227, 0.38); background: var(--accent); color: #fff; }
+.price-btn-primary:hover { background: var(--accent-dark); color: #fff; }
+.price-btn-danger:hover { color: var(--action-danger); border-color: rgba(255, 59, 48, 0.34); background: var(--action-danger-bg); }
+
+/* 行内改价：价格栏原位变输入框，布局不跳 */
+.price-edit { display: flex; align-items: baseline; gap: 6px; }
+.price-edit .input { width: 82px; padding: 4px 8px; font-family: var(--font-mono); text-align: right; }
+
+/* ─── 分页器：条数概览 + 每页量 + 翻页，一行收口（左右内边距同卡头，与价目行对齐） ─── */
+.price-pager {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-top: var(--sp-5, 18px); padding: 13px 12px 4px 14px; border-top: 1px solid var(--border);
+  font-size: 12.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+.price-pager-sum em { font-style: normal; margin: 0 5px; opacity: 0.55; }
+.price-pager-size { display: inline-flex; align-items: center; gap: 6px; }
+.price-size {
+  min-width: 36px; padding: 3px 9px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: transparent; color: var(--text-2);
+  font-family: var(--font-mono); font-size: 11.5px; cursor: pointer;
+  transition: color 0.16s var(--ease-out), border-color 0.16s var(--ease-out), background 0.16s var(--ease-out);
+}
+.price-size:hover { color: var(--text-0); border-color: var(--border-strong); }
+.price-size.active { border-color: rgba(0, 113, 227, 0.38); background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.price-pager-btns { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.price-page-no { min-width: 46px; text-align: center; font-family: var(--font-mono); font-size: 12px; color: var(--text-2); }
+
+/* ─── 空态：卡内浮一个虚线引导框，操作按钮只在这里出现一次 ─── */
+.price-empty {
+  margin: 14px;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-lg);
+  padding: 34px 20px; text-align: center;
+}
+.price-empty-title { font-size: 13.5px; font-weight: 600; color: var(--text-1); }
+.price-empty-desc { font-size: 12.5px; margin-top: 5px; color: var(--text-3); }
+.price-empty-cta { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+
+/* ─── 导入弹窗 ─── */
+.price-import-dialog, .price-add-dialog { width: min(720px, 92vw); }
+.price-add-dialog { width: min(460px, 92vw); }
+.price-add-body { display: grid; gap: 12px; }
+
+.pcat-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.pcat-toolbar .price-filter { margin: 0; }
+/* 单位只在工具条声明一次：目录行只留数字，与面板「价目节」同一口径 */
+.pcat-unit { font-size: 11.5px; color: var(--text-3); letter-spacing: 0.01em; padding-left: 2px; }
+.pcat-search { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.pcat-search .input { width: 186px; }
+.pcat-all { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.pcat-all input { accent-color: var(--accent); margin: 0; }
+
+.pcat-list {
+  max-height: 342px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-1, #fff);
+}
+.pcat-row {
+  display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+  transition: background 0.14s var(--ease-out);
+}
+.pcat-row:last-child { border-bottom: none; }
+.pcat-row:hover { background: var(--bg-hover); }
+.pcat-row.is-picked { background: var(--accent-bg); }
+.pcat-row.is-done { cursor: default; }
+.pcat-row.is-done .pcat-model, .pcat-row.is-done .pcat-price { color: var(--text-3); }
+.pcat-row input[type='checkbox'] { flex: 0 0 auto; width: 14px; height: 14px; accent-color: var(--accent); margin: 0; }
+/* 模型名可无限长（含括号区间说明）：只让它折行，厂商与价格永不换行 */
+.pcat-model { flex: 1 1 auto; min-width: 0; font-size: 12.5px; line-height: 1.35; color: var(--text-0); overflow-wrap: anywhere; }
+.pcat-vendor {
+  flex: 0 0 92px; font-size: 11.5px; color: var(--text-3); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pcat-price {
+  flex: 0 0 auto; min-width: 118px; text-align: right; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-1);
+}
+.pcat-done {
+  flex: 0 0 auto; font-size: 11px; color: var(--text-3);
+  border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 1px 7px;
+}
+.pcat-empty { padding: 26px 14px; text-align: center; font-size: 12.5px; color: var(--text-3); }
+
+.pcat-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 12px; font-size: 12.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+.pcat-picked { color: var(--accent-text); }
+.pcat-pager-btns { display: flex; align-items: center; gap: 10px; }

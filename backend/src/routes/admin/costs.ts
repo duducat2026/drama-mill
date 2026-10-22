@@ -19,10 +19,11 @@
 import { Hono } from 'hono'
 import { db, schema } from '../../db/index.js'
 import { aggregateCosts } from '../../services/cost.js'
-import { success } from '../../utils/response.js'
+import { badRequest, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
 import { and, count, desc, eq, inArray, like, sql } from 'drizzle-orm'
-import { pageOf, userMap, dramaMap } from './shared.js'
+import { pageOf, tooDeep, userMap, dramaMap } from './shared.js'
+import { cachedTotal, countKey } from './count-cache.js'
 
 const app = new Hono()
 
@@ -31,6 +32,7 @@ const app = new Hono()
 // GET /admin/costs?user_id=&drama_id=&drama_keyword=&episode_id=&page= — 汇总 + 明细分页
 app.get('/costs', async (c) => {
   const { page, pageSize } = pageOf(c)
+  if (tooDeep(page, pageSize)) return badRequest(c, '翻页过深，请用用户/项目/日期过滤后查询')
   const userId = Number(c.req.query('user_id')) || undefined
   const dramaId = Number(c.req.query('drama_id')) || undefined
   const episodeId = Number(c.req.query('episode_id')) || undefined
@@ -56,11 +58,15 @@ app.get('/costs', async (c) => {
     else dConds.push(inArray(schema.usageRecords.dramaId, ids))
   }
   const dWhere = dConds.length ? and(...dConds) : undefined
-  const [detailRows, totalRow] = await Promise.all([
+  const [detailRows, total] = await Promise.all([
     db.select().from(schema.usageRecords).where(dWhere)
       .orderBy(desc(schema.usageRecords.createdAt), desc(schema.usageRecords.id))
       .limit(pageSize).offset((page - 1) * pageSize),
-    db.select({ c: count() }).from(schema.usageRecords).where(dWhere),
+    // usage_records 为只增大表：COUNT 缓存 60s + 并发去重
+    cachedTotal(countKey('admin:costs', userId, dramaId, episodeId, dramaKeyword), async () => {
+      const [r] = await db.select({ c: count() }).from(schema.usageRecords).where(dWhere)
+      return Number(r?.c) || 0
+    }),
   ])
 
   const users = await userMap()
@@ -74,7 +80,7 @@ app.get('/costs', async (c) => {
   return success(c, {
     ...summary,
     by_drama: byDrama,
-    details_total: Number(totalRow[0]?.c) || 0,
+    details_total: total,
     page,
     page_size: pageSize,
     details: detailRows.map(r => ({

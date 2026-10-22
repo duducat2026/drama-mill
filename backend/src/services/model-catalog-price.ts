@@ -3,10 +3,9 @@
  * AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
  */
 import { db, schema } from '../db/index.js'
-import { now } from '../utils/response.js'
 import { or, isNull, eq } from 'drizzle-orm'
 
-// ─── 导入到平台计费刊例价表 model_prices ───
+// ─── 目录价派生刊例：model_catalog_prices → 计费口径价格行（目录价即刊例价，无落库副本） ───
 
 /** 单行原始价格（仅取映射所需列） */
 type RawPrice = {
@@ -21,9 +20,7 @@ type RawPrice = {
   source_url: string | null
 }
 
-export type ImportOptions = { usdRate?: number; dryRun?: boolean }
-
-export type ImportPlan = {
+export type CatalogPricePlan = {
   provider: string
   model: string
   billing_type: 'token' | 'image' | 'video_second'
@@ -43,8 +40,14 @@ const toNum = (v: string | null) => {
 const hasUnit = (r: RawPrice, re: RegExp) => re.test(r.price_unit || '')
 const batch = (r: RawPrice) => /batch/i.test(r.price_name || '')
 
+/** USD→CNY 折算汇率：目录计价统一口径，可用 CATALOG_USD_CNY_RATE 覆盖 */
+export function catalogUsdRate(): number {
+  const n = Number(process.env.CATALOG_USD_CNY_RATE)
+  return Number.isFinite(n) && n > 0 ? n : 7.2
+}
+
 /** 按产品线优先级判定计费类型：视频(每秒) > 图片(每张) > token(输入/输出)；均不命中返回 null */
-function buildPlan(rows: RawPrice[], usdRate: number): ImportPlan | null {
+export function buildPlan(rows: RawPrice[], usdRate: number): CatalogPricePlan | null {
   const first = rows[0]
   const base = {
     provider: first.provider || 'model-list',
@@ -71,13 +74,19 @@ function buildPlan(rows: RawPrice[], usdRate: number): ImportPlan | null {
   }
 
   // 3) token：单位含 token；输入/输出取基础档（排除缓存/思考/Batch/多模态冒号变体）
+  //    档名兼容中英文：中文前缀「输入/输出」，英文按 input|prompt / output|completion 词匹配
   const tokenRows = rows.filter(r => hasUnit(r, /token/i))
   if (tokenRows.length) {
-    const clean = (kw: string) => tokenRows.filter(r =>
-      (r.price_name || '').trim().startsWith(kw) && !/\u7f13\u5b58|\u601d\u8003|batch/i.test(r.price_name || ''))
+    const exclude = /缓存|思考|cached|thinking|reasoning|batch/i
+    const isInput = (r: RawPrice) => /输入/.test(r.price_name || '') || /\b(input|prompt)\b/i.test(r.price_name || '')
+    const isOutput = (r: RawPrice) => /输出/.test(r.price_name || '') || /\b(output|completion)\b/i.test(r.price_name || '')
+    const clean = (test: (r: RawPrice) => boolean) =>
+      tokenRows.filter(r => test(r) && !exclude.test(r.price_name || ''))
     const pickLow = (list: RawPrice[]) => list.length ? Math.min(...list.map(r => toNum(r.price) * (isUsd(r) ? usdRate : 1))) : 0
-    const input = pickLow(clean('\u8f93\u5165'))
-    const output = pickLow(clean('\u8f93\u51fa'))
+    let input = pickLow(clean(isInput))
+    const output = pickLow(clean(isOutput))
+    // 裸输入档缺失时（deepseek/kimi 等仅有「输入（缓存命中/未命中）」分档），回退取缓存未命中档
+    if (!(input > 0)) input = pickLow(tokenRows.filter(r => isInput(r) && /未命中|cache miss/i.test(r.price_name || '')))
     if (input > 0 || output > 0) return { ...base, billing_type: 'token', input_price: round(input), output_price: round(output), unit_price: 0 }
   }
 
@@ -85,15 +94,11 @@ function buildPlan(rows: RawPrice[], usdRate: number): ImportPlan | null {
 }
 
 /**
- * 从主库目录表 model_catalog_prices 聚合映射并导入到平台 model_prices。
- * - 仅处理含价格的模型（按 model_id 聚合）；无 token/图片/视频可计费档的模型（纯语音/按字符/按次）跳过。
- * - onlyMissing：按 model 名去重，已存在（含人工维护）的价格不覆盖。
- * - USD 按 usdRate 折算成 CNY；dryRun 仅返回计划不落库。
+ * 读取在售目录价格行（0 或 NULL 视为在售）。
  */
-export async function importCatalogPrices(opts: ImportOptions = {}) {
-  const usdRate = opts.usdRate && opts.usdRate > 0 ? opts.usdRate : 7.2
+async function loadOnSaleRows(): Promise<RawPrice[]> {
   const P = schema.modelCatalogPrices
-  const rows: RawPrice[] = (await db.select({
+  return (await db.select({
     modelId: P.modelId,
     modelName: P.modelName,
     provider: P.provider,
@@ -110,60 +115,32 @@ export async function importCatalogPrices(opts: ImportOptions = {}) {
     model_id: r.modelId, model_name: r.modelName, provider: r.provider, price_name: r.priceName,
     price: r.price, price_unit: r.priceUnit, currency: r.currency, source: r.source, source_url: r.sourceUrl,
   }))
+}
 
-  // 按 model_id 聚合（同模型多价格项归为一组）
+/**
+ * 从主库目录表聚合派生全量刊例价计划（目录价即刊例价）：
+ * - 按 model_id 聚合，仅保留含 token/图片/视频可计费档的模型（纯语音/按字符/按次跳过）；
+ * - 同名重复首条为准；USD 按 catalogUsdRate 折算 CNY。
+ * 调用方自带缓存（cost-price-lookup 60s / 用户目录端点即时调用）。
+ */
+export async function deriveCatalogPlans(): Promise<CatalogPricePlan[]> {
+  const usdRate = catalogUsdRate()
   const groups = new Map<string, RawPrice[]>()
-  for (const r of rows) {
+  for (const r of await loadOnSaleRows()) {
     const key = r.model_id || r.model_name || ''
     if (!key) continue
     const arr = groups.get(key)
     if (arr) arr.push(r)
     else groups.set(key, [r])
   }
-
-  // 现有 model_prices 模型名集合（onlyMissing 去重键：成本查价按 model 名回退）
-  const existing = new Set((await db.select({ model: schema.modelPrices.model }).from(schema.modelPrices)).map(x => x.model))
-
-  const plans: ImportPlan[] = []
+  const plans: CatalogPricePlan[] = []
   const seen = new Set<string>()
-  let skipped_unsupported = 0
-  let skipped_existing = 0
   for (const [, grp] of groups) {
     const plan = buildPlan(grp, usdRate)
-    if (!plan) { skipped_unsupported++; continue }
-    if (seen.has(plan.model)) continue // 目录内同名重复，首条为准
+    if (!plan) continue
+    if (seen.has(plan.model)) continue
     seen.add(plan.model)
-    if (existing.has(plan.model)) { skipped_existing++; continue }
     plans.push(plan)
   }
-
-  const by_type = plans.reduce((acc, p) => { acc[p.billing_type] = (acc[p.billing_type] || 0) + 1; return acc }, {} as Record<string, number>)
-  const result = {
-    dry_run: !!opts.dryRun,
-    usd_rate: usdRate,
-    planned: plans.length,
-    inserted: 0,
-    skipped_existing,
-    skipped_unsupported,
-    by_type,
-    sample: plans.slice(0, 30),
-  }
-  if (opts.dryRun) return result
-
-  const ts = now()
-  for (const p of plans) {
-    await db.insert(schema.modelPrices).values({
-      provider: p.provider,
-      model: p.model,
-      billingType: p.billing_type,
-      inputPrice: p.input_price,
-      outputPrice: p.output_price,
-      unitPrice: p.unit_price,
-      currency: p.currency,
-      source: p.source,
-      updatedAt: ts,
-    })
-    result.inserted++
-  }
-  return result
+  return plans
 }

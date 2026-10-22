@@ -119,7 +119,8 @@ export const mysqlSchemaPlatformStatements: string[] = [
     completed_at VARCHAR(64),
     deleted_at VARCHAR(64),
     INDEX idx_video_merges_episode_id (episode_id),
-    INDEX idx_video_merges_user_id (user_id)
+    INDEX idx_video_merges_user_id (user_id),
+    INDEX idx_video_merges_created_id (created_at, id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   `CREATE TABLE IF NOT EXISTS sys_config (

@@ -157,4 +157,8 @@ export async function ensureSchemaColumns(pool: Pool) {
   await dropIndex(pool, 'audit_logs', 'idx_audit_logs_created_at')
   // storyboards 此前无任何时间索引：平台分镜列表按 created_at 排序全量 filesort
   await ensureIndex(pool, 'storyboards', 'idx_storyboards_created_id', 'created_at, id')
+
+  // 1.98) video_merges 补排序对齐复合索引：拼接成片列表 WHERE deleted_at IS NULL + ORDER BY created_at DESC, id DESC
+  // 此前仅有 episode_id/user_id 索引，每请求全匹配集 filesort（对齐 1.97 治理，勿删——单列索引不覆盖双列排序）
+  await ensureIndex(pool, 'video_merges', 'idx_video_merges_created_id', 'created_at, id')
 }

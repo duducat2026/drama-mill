@@ -64,6 +64,7 @@ test('admin exposes retry config and abandon/restore endpoints', () => {
   // 复活清除放弃标记并还原错误信息
   assert.match(route, /\^\\\[已放弃\\\]\\s\*/)
 
-  // 一键重提排除已放弃任务
-  assert.match(route, /rows = rows\.filter\(t => !isAbandonedTask\(t\.retryCount\)\)/)
+  // 一键重提排除已放弃任务（扫描窗口来自 SQL 下推后的限量结果，禁止全表载入回退）
+  assert.match(route, /const rows = fetched\.filter\(t => !isAbandonedTask\(t\.retryCount\)\)/)
+  assert.doesNotMatch(route, /let rows = await db\.select\(\)\.from\(schema\.sysTask\)/)
 })

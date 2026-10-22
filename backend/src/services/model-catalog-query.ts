@@ -7,11 +7,12 @@
  * 模型目录价服务 · 检索侧 — 目录数据已收编进主库 model_catalog_models / model_catalog_prices
  * （部署期由 scripts/migrate-model-catalog.ts 从外部 model_list 库一次性迁入，运行时零外部库依赖）。
  *
- * 对 admin 暴露四个只读能力：目录概览、模型清单、价格列表、单模型价格明细；
+ * 对 admin 暴露三个只读能力：目录概览、价格列表分页、价格批量删除；
  * 均走主库 drizzle，COUNT + LIMIT/OFFSET 分页，过滤参数全部经占位符绑定（防注入）。
  * keyword 匹配依赖列的 utf8mb4_unicode_ci 排序规则，大小写不敏感，与原 LOWER LIKE 等价。
+ * 目录价即刊例价：本表实时派生为平台计价来源（见 cost-price-lookup），批量删除即退出计价。
  */
-import { and, desc, eq, isNotNull, like, or, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, like, or, sql, type SQL } from 'drizzle-orm'
 import type { MySqlColumn } from 'drizzle-orm/mysql-core'
 import { db, schema } from '../db/index.js'
 import { toSnakeCase } from '../utils/transform.js'
@@ -67,20 +68,6 @@ function buildWhere(f: CatalogFilter, cols: FilterCols, modelId?: string) {
   return filled.length ? and(...filled) : undefined
 }
 
-/** 模型清单：model_catalog_models 分页检索（名称/模型ID/厂商 模糊匹配） */
-export async function listCatalogModels(f: CatalogFilter): Promise<CatalogPaged<any>> {
-  await guardInitialized()
-  const where = buildWhere(f, { name: M.name, modelId: M.modelId, provider: M.provider, source: M.source, isOffline: M.isOffline })
-  const [cnt] = await db.select({ c: sql<number>`COUNT(*)` }).from(M).where(where)
-  const total = Number(cnt?.c) || 0
-  const items = total
-    ? (await db.select().from(M).where(where)
-        .orderBy(M.isOffline, M.provider, M.name)
-        .limit(f.pageSize).offset((f.page - 1) * f.pageSize)).map(toSnakeCase)
-    : []
-  return { total, page: f.page, page_size: f.pageSize, items }
-}
-
 /** 模型价格列表：model_catalog_prices 分页检索（keyword 额外匹配价格项名） */
 export async function listCatalogPrices(f: CatalogFilter & { modelId?: string }): Promise<CatalogPaged<any>> {
   await guardInitialized()
@@ -95,11 +82,14 @@ export async function listCatalogPrices(f: CatalogFilter & { modelId?: string })
   return { total, page: f.page, page_size: f.pageSize, items }
 }
 
-/** 单个模型的价格明细（点模型清单行时按 model_id 拉取） */
-export async function pricesOfModel(modelId: string): Promise<any[]> {
+/**
+ * 批量删除目录价格条目：删除选中的 model_catalog_prices 行即直接退出计价
+ * （目录价即刊例价，查价从目录表实时派生，无需清理任何副本表）。
+ */
+export async function batchDeleteCatalogPrices(ids: number[]): Promise<{ catalog_deleted: number }> {
   await guardInitialized()
-  const rows = await db.select().from(P).where(eq(P.modelId, modelId)).orderBy(P.id)
-  return rows.map(toSnakeCase)
+  const [del] = await db.delete(P).where(inArray(P.id, ids))
+  return { catalog_deleted: (del as any)?.affectedRows ?? ids.length }
 }
 
 /** 目录概览：模型数 / 价格条数 / 厂商与来源分布（用于页头统计与筛选下拉） */

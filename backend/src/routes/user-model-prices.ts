@@ -17,11 +17,12 @@
  */
 
 import { Hono } from 'hono'
-import { and, eq, like, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { badRequest, notFound, now, success } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { invalidatePriceCache } from '../services/cost-price-lookup.js'
+import { deriveCatalogPlans } from '../services/model-catalog.js'
 
 const app = new Hono()
 
@@ -49,23 +50,20 @@ app.get('/', async (c) => {
   return success(c, rows.map(r => toSnakeCase(r)))
 })
 
-// GET /model-prices/catalog?billing_type=&keyword=&page=&page_size= — 平台基准价目录（附我的导入状态）
+// GET /model-prices/catalog?billing_type=&keyword=&page=&page_size= — 平台目录价（附我的导入状态）
+// 目录价即刊例价：条目从主库 model_catalog_* 实时聚合派生，不再依赖单独维护的表
 app.get('/catalog', async (c) => {
   const user = c.get('user')
   const billingType = c.req.query('billing_type')
-  const keyword = (c.req.query('keyword') || '').trim()
+  const keyword = (c.req.query('keyword') || '').trim().toLowerCase()
   const page = Math.max(1, Number(c.req.query('page')) || 1)
   const pageSize = Math.min(100, Math.max(1, Number(c.req.query('page_size')) || 20))
 
-  const M = schema.modelPrices
-  const conds = []
-  if (billingType && BILLING_TYPES.includes(billingType)) conds.push(eq(M.billingType, billingType))
-  if (keyword) conds.push(like(M.model, `%${keyword}%`))
-  const where = conds.length ? and(...conds) : undefined
-
-  const [{ total }] = await db.select({ total: sql<number>`COUNT(*)` }).from(M).where(where)
-  const rows = await db.select().from(M).where(where)
-    .orderBy(M.billingType, M.model).limit(pageSize).offset((page - 1) * pageSize)
+  let plans = await deriveCatalogPlans()
+  if (billingType && BILLING_TYPES.includes(billingType)) plans = plans.filter(p => p.billing_type === billingType)
+  if (keyword) plans = plans.filter(p => p.model.toLowerCase().includes(keyword) || p.provider.toLowerCase().includes(keyword))
+  plans.sort((a, b) => `${a.billing_type}|${a.model}`.localeCompare(`${b.billing_type}|${b.model}`))
+  const rows = plans.slice((page - 1) * pageSize, page * pageSize)
 
   // 我已有价的模型名（含手动新增），用于前端标注「已导入」
   const mine = await db.select({ model: schema.userModelPrices.model })
@@ -73,14 +71,14 @@ app.get('/catalog', async (c) => {
   const importedSet = new Set(mine.map(m => m.model))
 
   return success(c, {
-    items: rows.map(r => ({ ...toSnakeCase(r), imported: importedSet.has(r.model) })),
-    total: Number(total) || 0,
+    items: rows.map(p => ({ ...p, imported: importedSet.has(p.model) })),
+    total: plans.length,
     page,
     page_size: pageSize,
   })
 })
 
-// POST /model-prices/import — 从平台基准价批量拷贝（已存在跳过，不覆盖已有价）
+// POST /model-prices/import — 从平台目录价批量拷贝（已存在跳过，不覆盖已有价）
 app.post('/import', async (c) => {
   const user = c.get('user')
   const body = await c.req.json().catch(() => null)
@@ -92,6 +90,8 @@ app.post('/import', async (c) => {
     .from(schema.userModelPrices).where(eq(schema.userModelPrices.userId, user.id))
   const mineSet = new Set(mine.map(m => m.model))
 
+  const planByModel = new Map((await deriveCatalogPlans()).map(p => [p.model, p]))
+
   let inserted = 0
   let skipped_existing = 0
   let skipped_missing = 0
@@ -99,20 +99,16 @@ app.post('/import', async (c) => {
   for (const it of items) {
     const model = String(it?.model || '').trim()
     if (!model || mineSet.has(model)) { skipped_existing += model ? 1 : 0; if (!model) skipped_missing++; continue }
-    const provider = String(it?.provider || '').trim()
-    // and() 可能返回 undefined（drizzle 类型），where 接受 undefined，直接内联传参
-    const [base] = await db.select().from(schema.modelPrices).where(
-      provider ? and(eq(schema.modelPrices.provider, provider), eq(schema.modelPrices.model, model)) : eq(schema.modelPrices.model, model),
-    ).limit(1)
+    const base = planByModel.get(model)
     if (!base) { skipped_missing++; continue }
     await db.insert(schema.userModelPrices).values({
       userId: user.id,
       provider: base.provider,
       model: base.model,
-      billingType: base.billingType,
-      inputPrice: base.inputPrice,
-      outputPrice: base.outputPrice,
-      unitPrice: base.unitPrice,
+      billingType: base.billing_type,
+      inputPrice: base.input_price,
+      outputPrice: base.output_price,
+      unitPrice: base.unit_price,
       currency: base.currency || 'CNY',
       source: 'platform',
       updatedAt: ts,
