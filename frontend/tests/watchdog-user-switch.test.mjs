@@ -72,8 +72,10 @@ test('设置页渲染两个看门狗开关并说明计费后果', () => {
   // 与模型调用总开关联动：总开关关闭时给出「开了也不会提交」的提示
   assert.match(settingsPage, /v-if="!aiCallEnabled" class="watchdog-note"/)
   assert.match(settingsPage, /v-else-if="!watchdogOnCount" class="watchdog-note"/)
-  // 进入设置页即与后端对齐状态
-  assert.match(settingsPage, /onMounted\(\(\) => \{[\s\S]*?else \{ loadCfgs\(\); loadStylePresets\(\); refreshAiCall\(\); refreshWatchdogs\(\) \}/)
+  // 数据按激活面板懒加载：看门狗数据只在进入 watchdogs 面板时拉，总开关状态进页即对齐
+  assert.match(settingsPage, /const PANEL_LOADERS = \{ ai: loadCfgs, styles: loadStylePresets, watchdogs: refreshWatchdogs \}/)
+  assert.match(settingsPage, /onMounted\(\(\) => \{[\s\S]*?else \{ refreshAiCall\(\); PANEL_LOADERS\[tab\.value\]\?\.\(\) \}/)
+  assert.match(settingsPage, /watch\(tab, \(id\) => \{ if \(!cfgPage\.value\) PANEL_LOADERS\[id\]\?\.\(\) \}\)/)
   // 面板样式存在，开启态有绿色左条与绿色图标（不只靠文字）
   assert.match(settingsCss, /\.watchdog-panel \{/)
   assert.match(settingsCss, /\.watchdog-panel\.is-on \{ border-left-color: var\(--success\); \}/)

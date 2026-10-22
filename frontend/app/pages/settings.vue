@@ -32,19 +32,19 @@
 
       <div class="settings-content">
         <!-- ===== AI 服务配置 ===== -->
-        <SettingsAiPanel v-if="tab === 'ai'" />
+        <LazySettingsAiPanel v-if="tab === 'ai'" />
         <!-- ===== 后台看门狗 ===== -->
-        <SettingsWatchdogPanel v-else-if="tab === 'watchdogs'" class="settings-scroll" />
+        <LazySettingsWatchdogPanel v-else-if="tab === 'watchdogs'" class="settings-scroll" />
         <!-- ===== 风格预设 ===== -->
-        <SettingsStylesPanel v-else-if="tab === 'styles'" />
+        <LazySettingsStylesPanel v-else-if="tab === 'styles'" />
         <!-- ===== 模型价格 ===== -->
-        <SettingsPricesPanel v-else-if="tab === 'prices'" />
+        <LazySettingsPricesPanel v-else-if="tab === 'prices'" />
       </div>
     </div>
 
     <!-- AI 配置独立编辑器 / 极简生成测试弹层（共享同一份页面状态） -->
-    <SettingsCfgEditor v-if="cfgPage" />
-    <SettingsGenTestDialog />
+    <LazySettingsCfgEditor v-if="cfgPage" />
+    <LazySettingsGenTestDialog />
 
     <ConfirmDialog
       :open="!!styleToDelete"
@@ -70,12 +70,8 @@
 
 <script setup>
 import { Plus, Pencil, Trash2, Loader2, Cpu, Palette, Star, Power, AlertTriangle, TimerReset, Eye, EyeOff, Copy, ArrowLeft, FileText, Image, Video, Coins } from 'lucide-vue-next'
-import SettingsAiPanel from '~/components/settings/SettingsAiPanel.vue'
-import SettingsWatchdogPanel from '~/components/settings/SettingsWatchdogPanel.vue'
-import SettingsStylesPanel from '~/components/settings/SettingsStylesPanel.vue'
-import SettingsPricesPanel from '~/components/settings/SettingsPricesPanel.vue'
-import SettingsCfgEditor from '~/components/settings/SettingsCfgEditor.vue'
-import SettingsGenTestDialog from '~/components/settings/SettingsGenTestDialog.vue'
+// 六个 settings 面板/编辑器/弹层走 <Lazy*> 自动导入分包：切面板才按需拉 chunk，
+// SSR 首屏与 hydration 由 Nuxt lazy-components 机制兜底，勿改回显式 import。
 import { useSettingsPage } from '~/composables/settings/useSettingsPage'
 
 // 列表与独立表单复用配置逻辑，路径变化时重建页面，查询参数切换 Tab 不重建。
@@ -96,10 +92,14 @@ const {
   onAiCallOffConfirmed, cancelAiCallOff,
 } = useSettingsPage()
 
+// 只拉激活面板的数据：进页面/切面板各触发一次，prices 面板自带 onMounted 自加载。
+// refreshAiCall 例外：全站模型调用开关状态（顶栏与看门狗面板提示共用），进页面即对齐一次。
+const PANEL_LOADERS = { ai: loadCfgs, styles: loadStylePresets, watchdogs: refreshWatchdogs }
 onMounted(() => {
   if (cfgPage.value) loadCfgEditor()
-  else { loadCfgs(); loadStylePresets(); refreshAiCall(); refreshWatchdogs() }
+  else { refreshAiCall(); PANEL_LOADERS[tab.value]?.() }
 })
+watch(tab, (id) => { if (!cfgPage.value) PANEL_LOADERS[id]?.() })
 </script>
 
 <style scoped src="assets/styles/settings.css"></style>

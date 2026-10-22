@@ -31,8 +31,8 @@ test('四个面板根容器都落在 .settings-scroll 上', () => {
   assert.match(page, /<div class="settings-scroll">\s*<div class="settings-head">\s*<h2 class="settings-title">AI 服务配置/)
   assert.match(pricesPanel, /<div class="settings-scroll">\s*<div class="settings-head">\s*<h2 class="settings-title">模型价格/)
   assert.match(page, /<div class="settings-scroll">\s*<div class="settings-head">\s*<h2 class="settings-title">风格预设/)
-  // 看门狗根节点无 class，靠页面 fallthrough 传入（scoped 父 id 会落到子组件根元素）
-  assert.match(page, /<SettingsWatchdogPanel v-else-if="tab === 'watchdogs'" class="settings-scroll" \/>/)
+  // 看门狗根节点无 class，靠页面 fallthrough 传入（scoped 父 id 会落到子组件根元素）；Lazy 分包前缀同样成立
+  assert.match(page, /<LazySettingsWatchdogPanel v-else-if="tab === 'watchdogs'" class="settings-scroll" \/>/)
 })
 
 test('窄栏覆写只允许同文件后置声明', () => {

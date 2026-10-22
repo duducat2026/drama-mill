@@ -54,8 +54,9 @@ test('模型价格面板 + 导入弹窗：我的模型价/导入/自定义/删�
 
   const page = read('app/pages/settings.vue')
   assert.match(page, /\{ id: 'prices', label: '模型价格', icon: Coins \}/)
-  assert.match(page, /import SettingsPricesPanel from '~\/components\/settings\/SettingsPricesPanel\.vue'/)
-  assert.match(page, /<SettingsPricesPanel v-else-if="tab === 'prices'" \/>/)
+  // 面板走 <Lazy*> 自动导入分包（不再显式 import），切到价格 tab 才拉 chunk
+  assert.doesNotMatch(page, /import SettingsPricesPanel from/)
+  assert.match(page, /<LazySettingsPricesPanel v-else-if="tab === 'prices'" \/>/)
 })
 
 test('价目单式列表：按模态分节 + 单位进节头 + 数字格式化（不得回退成多列表格）', () => {
