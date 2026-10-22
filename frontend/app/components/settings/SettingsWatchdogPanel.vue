@@ -34,6 +34,8 @@
           <input
             type="checkbox"
             class="sr-only"
+            role="switch"
+            :aria-label="wd.label"
             :checked="watchdogs[wd.kind]"
             :disabled="watchdogSubmitting === wd.kind"
             @change="onWatchdogToggle(wd.kind, $event)"

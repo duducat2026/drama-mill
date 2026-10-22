@@ -35,7 +35,13 @@
         </div>
         <!-- 内置风格全局共享：非管理员只读，避免个人修改影响其他用户 -->
         <label v-if="!p.is_system || isAdmin" class="config-switch">
-          <input type="checkbox" class="sr-only" :checked="p.is_active" @change="toggleStyle(p)">
+          <!-- sr-only 视觉隐藏但需可被读屏/自动化定位：aria-label 提供可访问名，role=switch 声明开关语义 -->
+          <input
+            type="checkbox" class="sr-only" role="switch"
+            :checked="p.is_active"
+            :aria-label="`${p.is_active ? '停用' : '启用'}风格「${p.name}」`"
+            @change="toggleStyle(p)"
+          >
           <span class="switch" :class="{ on: p.is_active }"></span>
         </label>
         <button v-if="!p.is_system || isAdmin" class="btn btn-ghost btn-icon btn-sm" @click="startEditStyle(p)"><Pencil :size="13" /></button>

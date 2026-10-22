@@ -27,7 +27,7 @@
       </div>
       <span :class="['tag', aiCallEnabled ? 'tag-success' : 'tag-warning']">{{ aiCallEnabled ? '已开启' : '已关闭' }}</span>
       <label class="config-switch" title="关闭后本人全部 AI 调用将被服务端拦截">
-        <input ref="aiCallSwitchEl" type="checkbox" class="sr-only" :checked="aiCallEnabled" :disabled="aiCallSubmitting" @change="onAiCallToggle">
+        <input ref="aiCallSwitchEl" type="checkbox" class="sr-only" role="switch" aria-label="模型调用总开关" :checked="aiCallEnabled" :disabled="aiCallSubmitting" @change="onAiCallToggle">
         <span class="switch" :class="{ on: aiCallEnabled }"></span>
       </label>
     </section>

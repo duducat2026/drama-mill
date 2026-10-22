@@ -158,9 +158,14 @@ app.get('/static/*', async (c) => {
 // 其余路径回 200.html 做 SPA fallback（serverRendered=false，无 path 字段），
 // 避免水合时 SSR path 与地址栏不符把用户弹回首页
 const distPath = path.join(projectRoot, 'frontend', 'dist')
-app.use('*', serveStatic({ root: distPath }))
-app.get('/', serveStatic({ root: distPath, path: 'index.html' }))
-app.get('*', serveStatic({ root: distPath, path: '200.html' }))
+// SPA 壳页必须每次协商校验（no-cache + ETag 304）：构建换 chunk 哈希后，
+// 浏览器若沿用缓存旧 HTML 会去拉已删除的旧 chunk，导致懒加载面板 404 空白
+const revalidateShell = (p: string, c: any) => {
+  if (/\.html$/.test(p)) c.header('Cache-Control', 'no-cache')
+}
+app.use('*', serveStatic({ root: distPath, onFound: revalidateShell }))
+app.get('/', serveStatic({ root: distPath, path: 'index.html', onFound: revalidateShell }))
+app.get('*', serveStatic({ root: distPath, path: '200.html', onFound: revalidateShell }))
 
 const port = Number(process.env.PORT || 5679)
 console.log(`🚀 Drama Mill TS server on http://localhost:${port}`)
