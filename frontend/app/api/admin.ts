@@ -55,7 +55,7 @@ export const adminAPI = {
   modelPrices: (params?: any) => api.get(`/admin/model-prices${adminQuery(params)}`),
   createModelPrice: (d: any) => api.post('/admin/model-prices', d),
   updateModelPrice: (id: number, d: any) => api.put(`/admin/model-prices/${id}`, d),
-  // 模型目录价（平台侧：从独立 model_list 库只读提取模型清单与价格列表）
+  // 模型目录价（平台侧：读取主库目录表 model_catalog_*，由部署期迁移脚本从采集库收编）
   modelCatalogStats: () => api.get('/admin/model-catalog/stats'),
   modelCatalogModels: (params?: any) => api.get(`/admin/model-catalog/models${adminQuery(params)}`),
   modelCatalogPrices: (params?: any) => api.get(`/admin/model-catalog/prices${adminQuery(params)}`),

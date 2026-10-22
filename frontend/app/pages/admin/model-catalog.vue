@@ -19,9 +19,9 @@
 <template>
   <div>
     <div class="admin-page-title">模型目录价</div>
-    <div class="admin-page-desc">模型清单与价格列表从本地 model_list 库只读提取，供平台侧查阅厂商目录价（不参与业务计费）</div>
+    <div class="admin-page-desc">模型清单与价格列表读取主库目录表（model_catalog_*，由部署期迁移脚本从采集库收编），供平台侧查阅厂商目录价（不参与业务计费）</div>
 
-    <!-- 目录库不可达告警（model_list 未部署 / 连不上时给出可操作提示） -->
+    <!-- 目录未初始化告警（迁移脚本还没跑 / 目录表为空时给出可操作提示） -->
     <div v-if="catalogError" class="mc-error">
       ⚠ {{ catalogError }}
       <button class="btn btn-sm" @click="init">重试</button>
@@ -206,7 +206,7 @@ async function init() {
     stats.value = await adminAPI.modelCatalogStats()
     await load(1)
   } catch (e: any) {
-    catalogError.value = e?.message || '模型目录库（model_list）不可达'
+    catalogError.value = e?.message || '模型目录加载失败（请先运行 migrate-model-catalog 迁移脚本）'
   }
 }
 

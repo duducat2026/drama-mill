@@ -23,7 +23,7 @@ import { pageOf } from './shared.js'
 
 const app = new Hono()
 
-// ─── 11b. 模型目录价（平台侧：从独立 model_list 库只读提取模型清单与价格列表） ───
+// ─── 11b. 模型目录价（平台侧：主库 model_catalog_* 表，目录数据由部署期迁移脚本收编自主库） ───
 
 /** 目录价分页参数：复用通用 pageOf，page_size 上限放宽到 100（目录清单字段多） */
 function catalogPageOf(c: any): { page: number; pageSize: number } {
@@ -32,7 +32,7 @@ function catalogPageOf(c: any): { page: number; pageSize: number } {
   return { page, pageSize }
 }
 
-/** 目录库不可达统一处理：转 503 提示，其它异常透传给全局 errorHandler */
+/** 目录未初始化统一处理：转 503 提示运行迁移脚本，其它异常透传给全局 errorHandler */
 function catalogError(c: any, err: any) {
   if (err instanceof CatalogUnavailable) {
     return c.json({ code: 503, message: err.message }, 503)

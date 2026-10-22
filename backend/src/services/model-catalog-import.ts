@@ -4,7 +4,7 @@
  */
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
-import { query, wrapError } from './model-catalog-query.js'
+import { or, isNull, eq } from 'drizzle-orm'
 
 // ─── 导入到平台计费刊例价表 model_prices ───
 
@@ -85,21 +85,31 @@ function buildPlan(rows: RawPrice[], usdRate: number): ImportPlan | null {
 }
 
 /**
- * 从 model_list.prices 聚合映射并导入到平台 model_prices。
+ * 从主库目录表 model_catalog_prices 聚合映射并导入到平台 model_prices。
  * - 仅处理含价格的模型（按 model_id 聚合）；无 token/图片/视频可计费档的模型（纯语音/按字符/按次）跳过。
  * - onlyMissing：按 model 名去重，已存在（含人工维护）的价格不覆盖。
  * - USD 按 usdRate 折算成 CNY；dryRun 仅返回计划不落库。
  */
 export async function importCatalogPrices(opts: ImportOptions = {}) {
   const usdRate = opts.usdRate && opts.usdRate > 0 ? opts.usdRate : 7.2
-  let rows: RawPrice[]
-  try {
-    rows = await query<RawPrice>(
-      `SELECT model_id, model_name, provider, price_name, price, price_unit, currency, source, source_url
-       FROM prices WHERE (is_offline = 0 OR is_offline IS NULL) ORDER BY model_id ASC, id ASC`)
-  } catch (err) {
-    throw wrapError(err)
-  }
+  const P = schema.modelCatalogPrices
+  const rows: RawPrice[] = (await db.select({
+    modelId: P.modelId,
+    modelName: P.modelName,
+    provider: P.provider,
+    priceName: P.priceName,
+    price: P.price,
+    priceUnit: P.priceUnit,
+    currency: P.currency,
+    source: P.source,
+    sourceUrl: P.sourceUrl,
+    isOffline: P.isOffline,
+  }).from(P).where(or(eq(P.isOffline, false), isNull(P.isOffline)))
+    .orderBy(P.modelId, P.id)
+  ).map(r => ({
+    model_id: r.modelId, model_name: r.modelName, provider: r.provider, price_name: r.priceName,
+    price: r.price, price_unit: r.priceUnit, currency: r.currency, source: r.source, source_url: r.sourceUrl,
+  }))
 
   // 按 model_id 聚合（同模型多价格项归为一组）
   const groups = new Map<string, RawPrice[]>()

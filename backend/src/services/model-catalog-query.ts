@@ -2,73 +2,34 @@
  * Drama Mill — AI 短剧生成平台
  * AGPL-3.0 licensed. (C) 2026 Drama Mill <52859273@qq.com>
  */
-import 'dotenv/config'
-import fs from 'fs'
-import mysql from 'mysql2/promise'
 
 /**
- * 模型目录价服务 · 检索侧 — 从独立的 model_list 数据库只读提取「模型清单」与「模型价格列表」
+ * 模型目录价服务 · 检索侧 — 目录数据已收编进主库 model_catalog_models / model_catalog_prices
+ * （部署期由 scripts/migrate-model-catalog.ts 从外部 model_list 库一次性迁入，运行时零外部库依赖）。
  *
- * 数据来源：本地 MySQL 的 model_list 库（models / prices 两张表），
- * 由外部采集流水线维护，平台侧只做只读检索与展示（不参与业务计费）。
- *
- * 连接凭据默认复用主库的 MYSQL_* 配置（同实例、同业务账号），库名指向 model_list；
- * 可用 MODEL_LIST_HOST/PORT/USER/PASSWORD/DATABASE 单独覆盖，适配目录库与业务库分部署的场景。
+ * 对 admin 暴露四个只读能力：目录概览、模型清单、价格列表、单模型价格明细；
+ * 均走主库 drizzle，COUNT + LIMIT/OFFSET 分页，过滤参数全部经占位符绑定（防注入）。
+ * keyword 匹配依赖列的 utf8mb4_unicode_ci 排序规则，大小写不敏感，与原 LOWER LIKE 等价。
  */
+import { and, desc, eq, isNotNull, like, or, sql, type SQL } from 'drizzle-orm'
+import type { MySqlColumn } from 'drizzle-orm/mysql-core'
+import { db, schema } from '../db/index.js'
+import { toSnakeCase } from '../utils/transform.js'
 
-// 容器内 127.0.0.1 指向容器自身：未显式配置目录库主机时，容器环境默认指向宿主机
-const inContainer = typeof process.env.MYSQL_HOST === 'undefined' && fs.existsSync('/.dockerenv')
-
-function catalogUrl() {
-  const host = process.env.MODEL_LIST_HOST || process.env.MYSQL_HOST || (inContainer ? 'host.docker.internal' : '127.0.0.1')
-  const port = process.env.MODEL_LIST_PORT || process.env.MYSQL_PORT || '3306'
-  const user = process.env.MODEL_LIST_USER || process.env.MYSQL_USER || 'dramamill'
-  const password = process.env.MODEL_LIST_PASSWORD || process.env.MYSQL_PASSWORD || ''
-  const database = process.env.MODEL_LIST_DATABASE || 'model_list'
-  return `mysql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`
-}
-
-let poolPromise: Promise<mysql.Pool> | null = null
-
-/** 懒建连接池：目录库不可达时只在接口调用时抛错，不影响主服务启动 */
-function getPool(): Promise<mysql.Pool> {
-  if (!poolPromise) {
-    poolPromise = Promise.resolve(
-      mysql.createPool({
-        uri: catalogUrl(),
-        waitForConnections: true,
-        connectionLimit: 5,
-        queueLimit: 50,
-        charset: 'utf8mb4',
-      }),
-    )
-  }
-  return poolPromise
-}
-
-export async function query<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
-  const pool = await getPool()
-  const [rows] = await pool.query(sql, params)
-  return rows as T[]
-}
+const M = schema.modelCatalogModels
+const P = schema.modelCatalogPrices
 
 export type CatalogPaged<T> = { total: number; page: number; page_size: number; items: T[] }
 
-/** 目录价接口统一错误封装：区分「目录库不可达」与查询语法错误，给出可操作提示 */
+/** 目录表未初始化（迁移脚本还没跑）：接口层沿用 503 提示，语义替代原「目录库不可达」 */
 export class CatalogUnavailable extends Error {}
 
-export function wrapError(err: unknown): Error {
-  const msg = (err as Error)?.message || String(err)
-  if (/ECONNREFUSED|ENOTFOUND|ER_ACCESS_DENIED|ER_NO_SUCH_TABLE|PROTOCOL_CONNECTION|ETIMEDOUT|ER_HOST_NOT_PRIVILEGED|Access denied/i.test(msg)) {
-    return new CatalogUnavailable(`模型目录库（model_list）不可达：${msg}`)
+async function guardInitialized(): Promise<void> {
+  const [row] = await db.select({ c: sql<number>`COUNT(*)` }).from(M)
+  if (!Number(row?.c)) {
+    throw new CatalogUnavailable('模型目录表尚未初始化：请运行 backend/scripts/migrate-model-catalog.ts 将目录数据收编进主库')
   }
-  return err as Error
 }
-
-// models 表列表投影：不携带 raw_json / inference_metadata_raw 等大字段
-const MODEL_COLUMNS = `id, name, model_id, provider, inference_provider, source, source_url,
-  context_window, max_input_tokens, max_output_tokens, request_modality, response_modality,
-  features, description, published_time, offline_time, is_offline, extracted_at`
 
 export type CatalogFilter = {
   keyword?: string
@@ -79,94 +40,83 @@ export type CatalogFilter = {
   pageSize: number
 }
 
-/** 模型清单：models 表分页检索（名称/模型ID/厂商 模糊匹配） */
-export async function listCatalogModels(f: CatalogFilter): Promise<CatalogPaged<any>> {
-  const conds: string[] = []
-  const params: unknown[] = []
-  if (f.keyword) {
-    conds.push('(LOWER(name) LIKE ? OR LOWER(model_id) LIKE ? OR LOWER(provider) LIKE ?)')
-    const kw = `%${f.keyword.toLowerCase()}%`
-    params.push(kw, kw, kw)
-  }
-  if (f.provider) { conds.push('provider = ?'); params.push(f.provider) }
-  if (f.source) { conds.push('source = ?'); params.push(f.source) }
-  if (f.offline === '1') conds.push('is_offline = 1')
-  else if (f.offline === '0') conds.push('is_offline = 0')
-  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
-
-  try {
-    const [cntRow] = await query<{ c: number }>(`SELECT COUNT(*) AS c FROM models ${where}`, params)
-    const total = Number(cntRow?.c) || 0
-    const offset = (f.page - 1) * f.pageSize
-    const items = total
-      ? await query(`SELECT ${MODEL_COLUMNS} FROM models ${where} ORDER BY is_offline ASC, provider ASC, name ASC LIMIT ? OFFSET ?`,
-        [...params, f.pageSize, offset])
-      : []
-    return { total, page: f.page, page_size: f.pageSize, items }
-  } catch (err) {
-    throw wrapError(err)
-  }
+/** 两表列名不同（models.name vs prices.model_name），过滤条件按传入列引用组装 */
+type FilterCols = {
+  name: MySqlColumn
+  modelId: MySqlColumn
+  provider: MySqlColumn
+  source: MySqlColumn
+  isOffline: MySqlColumn
+  priceName?: MySqlColumn
 }
 
-// prices 表列表投影：不携带 price_raw 大字段
-const PRICE_COLUMNS = `id, model_name, model_id, provider, inference_provider, cap_zh, range_name,
-  price_name, price_type, price, price_unit, time_band, currency, unit_price_cny, unit_cny,
-  billing_mode, spec, price_kind, source, source_url, is_offline, extracted_at`
+function buildWhere(f: CatalogFilter, cols: FilterCols, modelId?: string) {
+  const conds: (SQL | undefined)[] = []
+  const kw = f.keyword?.trim()
+  if (kw) {
+    const likes = [like(cols.name, `%${kw}%`), like(cols.modelId, `%${kw}%`), like(cols.provider, `%${kw}%`)]
+    if (cols.priceName) likes.push(like(cols.priceName, `%${kw}%`))
+    conds.push(or(...likes))
+  }
+  if (modelId) conds.push(eq(cols.modelId, modelId))
+  if (f.provider) conds.push(eq(cols.provider, f.provider))
+  if (f.source) conds.push(eq(cols.source, f.source))
+  if (f.offline === '1') conds.push(eq(cols.isOffline, true))
+  else if (f.offline === '0') conds.push(eq(cols.isOffline, false))
+  const filled = conds.filter(Boolean) as SQL[]
+  return filled.length ? and(...filled) : undefined
+}
 
+/** 模型清单：model_catalog_models 分页检索（名称/模型ID/厂商 模糊匹配） */
+export async function listCatalogModels(f: CatalogFilter): Promise<CatalogPaged<any>> {
+  await guardInitialized()
+  const where = buildWhere(f, { name: M.name, modelId: M.modelId, provider: M.provider, source: M.source, isOffline: M.isOffline })
+  const [cnt] = await db.select({ c: sql<number>`COUNT(*)` }).from(M).where(where)
+  const total = Number(cnt?.c) || 0
+  const items = total
+    ? (await db.select().from(M).where(where)
+        .orderBy(M.isOffline, M.provider, M.name)
+        .limit(f.pageSize).offset((f.page - 1) * f.pageSize)).map(toSnakeCase)
+    : []
+  return { total, page: f.page, page_size: f.pageSize, items }
+}
+
+/** 模型价格列表：model_catalog_prices 分页检索（keyword 额外匹配价格项名） */
 export async function listCatalogPrices(f: CatalogFilter & { modelId?: string }): Promise<CatalogPaged<any>> {
-  const conds: string[] = []
-  const params: unknown[] = []
-  if (f.keyword) {
-    conds.push('(LOWER(model_name) LIKE ? OR LOWER(model_id) LIKE ? OR LOWER(provider) LIKE ? OR LOWER(price_name) LIKE ?)')
-    const kw = `%${f.keyword.toLowerCase()}%`
-    params.push(kw, kw, kw, kw)
-  }
-  if (f.modelId) { conds.push('model_id = ?'); params.push(f.modelId) }
-  if (f.provider) { conds.push('provider = ?'); params.push(f.provider) }
-  if (f.source) { conds.push('source = ?'); params.push(f.source) }
-  if (f.offline === '1') conds.push('is_offline = 1')
-  else if (f.offline === '0') conds.push('is_offline = 0')
-  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
-
-  try {
-    const [cntRow] = await query<{ c: number }>(`SELECT COUNT(*) AS c FROM prices ${where}`, params)
-    const total = Number(cntRow?.c) || 0
-    const offset = (f.page - 1) * f.pageSize
-    const items = total
-      ? await query(`SELECT ${PRICE_COLUMNS} FROM prices ${where} ORDER BY model_id ASC, id ASC LIMIT ? OFFSET ?`,
-        [...params, f.pageSize, offset])
-      : []
-    return { total, page: f.page, page_size: f.pageSize, items }
-  } catch (err) {
-    throw wrapError(err)
-  }
+  await guardInitialized()
+  const where = buildWhere(f, { name: P.modelName, modelId: P.modelId, provider: P.provider, source: P.source, isOffline: P.isOffline, priceName: P.priceName }, f.modelId?.trim() || undefined)
+  const [cnt] = await db.select({ c: sql<number>`COUNT(*)` }).from(P).where(where)
+  const total = Number(cnt?.c) || 0
+  const items = total
+    ? (await db.select().from(P).where(where)
+        .orderBy(P.modelId, P.id)
+        .limit(f.pageSize).offset((f.page - 1) * f.pageSize)).map(toSnakeCase)
+    : []
+  return { total, page: f.page, page_size: f.pageSize, items }
 }
 
 /** 单个模型的价格明细（点模型清单行时按 model_id 拉取） */
 export async function pricesOfModel(modelId: string): Promise<any[]> {
-  try {
-    return await query(`SELECT ${PRICE_COLUMNS} FROM prices WHERE model_id = ? ORDER BY id ASC`, [modelId])
-  } catch (err) {
-    throw wrapError(err)
-  }
+  await guardInitialized()
+  const rows = await db.select().from(P).where(eq(P.modelId, modelId)).orderBy(P.id)
+  return rows.map(toSnakeCase)
 }
 
 /** 目录概览：模型数 / 价格条数 / 厂商与来源分布（用于页头统计与筛选下拉） */
 export async function catalogStats() {
-  try {
-    const [modelCnt, priceCnt, providers, sources] = await Promise.all([
-      query<{ c: number }>('SELECT COUNT(*) AS c FROM models'),
-      query<{ c: number }>('SELECT COUNT(*) AS c FROM prices'),
-      query<{ provider: string; c: number }>('SELECT provider, COUNT(*) AS c FROM models WHERE provider IS NOT NULL GROUP BY provider ORDER BY c DESC'),
-      query<{ source: string; c: number }>('SELECT source, COUNT(*) AS c FROM models WHERE source IS NOT NULL GROUP BY source ORDER BY c DESC'),
-    ])
-    return {
-      model_total: Number(modelCnt[0]?.c) || 0,
-      price_total: Number(priceCnt[0]?.c) || 0,
-      providers: providers.map(p => ({ provider: p.provider, count: Number(p.c) || 0 })),
-      sources: sources.map(s => ({ source: s.source, count: Number(s.c) || 0 })),
-    }
-  } catch (err) {
-    throw wrapError(err)
+  await guardInitialized()
+  const [modelCnt, priceCnt, providers, sources] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(M),
+    db.select({ c: sql<number>`COUNT(*)` }).from(P),
+    db.select({ provider: M.provider, c: sql<number>`COUNT(*) AS c` }).from(M)
+      .where(isNotNull(M.provider)).groupBy(M.provider).orderBy(desc(sql`c`)),
+    db.select({ source: M.source, c: sql<number>`COUNT(*) AS c` }).from(M)
+      .where(isNotNull(M.source)).groupBy(M.source).orderBy(desc(sql`c`)),
+  ])
+  return {
+    model_total: Number(modelCnt[0]?.c) || 0,
+    price_total: Number(priceCnt[0]?.c) || 0,
+    providers: providers.map(p => ({ provider: p.provider, count: Number(p.c) || 0 })),
+    sources: sources.map(s => ({ source: s.source, count: Number(s.c) || 0 })),
   }
 }

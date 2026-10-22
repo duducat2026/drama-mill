@@ -284,6 +284,60 @@ export const mysqlSchemaPlatformStatements: string[] = [
     INDEX idx_ump_user_id (user_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  // 模型目录·模型清单：原外部 model_list.models 收编进主库（id 保留原值，迁移脚本按 id upsert）
+  `CREATE TABLE IF NOT EXISTS model_catalog_models (
+    id INT NOT NULL PRIMARY KEY,
+    name VARCHAR(256),
+    model_id VARCHAR(256),
+    provider VARCHAR(256),
+    inference_provider VARCHAR(256),
+    source VARCHAR(32),
+    source_url VARCHAR(512),
+    context_window BIGINT,
+    max_input_tokens BIGINT,
+    max_output_tokens BIGINT,
+    request_modality TEXT,
+    response_modality TEXT,
+    features TEXT,
+    description TEXT,
+    published_time VARCHAR(64),
+    offline_time VARCHAR(64),
+    is_offline TINYINT(1) DEFAULT 0,
+    extracted_at VARCHAR(32),
+    INDEX idx_mcm_model_id (model_id),
+    INDEX idx_mcm_provider (provider),
+    INDEX idx_mcm_source (source)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  // 模型目录·价格明细：原外部 model_list.prices 收编进主库（price 维持字符串原值）
+  `CREATE TABLE IF NOT EXISTS model_catalog_prices (
+    id INT NOT NULL PRIMARY KEY,
+    model_name VARCHAR(256),
+    model_id VARCHAR(256),
+    provider VARCHAR(256),
+    inference_provider VARCHAR(256),
+    cap_zh TEXT,
+    range_name VARCHAR(256),
+    price_name VARCHAR(256),
+    price_type VARCHAR(64),
+    price VARCHAR(64),
+    price_unit VARCHAR(64),
+    time_band VARCHAR(64),
+    currency VARCHAR(16),
+    unit_price_cny DOUBLE,
+    unit_cny VARCHAR(64),
+    billing_mode VARCHAR(32),
+    spec VARCHAR(256),
+    price_kind VARCHAR(64),
+    source VARCHAR(32),
+    source_url VARCHAR(512),
+    is_offline TINYINT(1) DEFAULT 0,
+    extracted_at VARCHAR(32),
+    INDEX idx_mcp_model_id (model_id),
+    INDEX idx_mcp_provider (provider),
+    INDEX idx_mcp_source (source)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   // AI 用量与成本明细：每次模型调用落一条（文本按 token，图片按张，视频按秒）
   `CREATE TABLE IF NOT EXISTS usage_records (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,

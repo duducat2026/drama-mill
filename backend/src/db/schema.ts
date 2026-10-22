@@ -22,3 +22,4 @@
  */
 export * from './schema-content.js'
 export * from './schema-config.js'
+export * from './schema-catalog.js'
