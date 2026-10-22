@@ -43,6 +43,7 @@ backend/                     — Hono + Drizzle ORM + mysql2 + Mastra AI Agents
 backend/workspace/skills/    — Agent 技能定义（SKILL.md，设置页可在线编辑）
 data/static/                 — 生成的图片 / 视频 / 合成产物（本地文件存储）
 docker/init.sql              — 预建表 + 内置种子（29 个风格预设、3 个小说拆分模版，可选）
+docker/model-catalog-data.sql — 模型目录数据快照（约 2500 模型 / 10000+ 价格行，导入即用）
 deployment/                  — 一键部署、云端发布、磁盘监测、root 运维脚本
 nginx/                       — 反向代理模板（SSE 关缓冲、/static 磁盘直连、大文件上传）
 ```
@@ -212,9 +213,10 @@ cd ../backend && npm start
 DATABASE_URL=mysql://dramamill:dramamill_tool@127.0.0.1:3306/drama_mill npm start
 ```
 
-- 共 **27 张表**，覆盖剧集/分集/分镜/资产/任务/AI 配置/风格/用量/审计等。
+- 共 **30 张表**，覆盖剧集/分集/分镜/资产/任务/AI 配置/风格/用量/审计/模型目录等。
 - 需要在应用外预建表（如 DBA 审核）时用 `docker/init.sql`；schema 变更后在 `backend/` 下执行 `npx tsx scripts/export-init-sql.ts` 重新生成。
 - 内置种子（幂等补行，不覆盖用户编辑）：**29 个漫剧风格预设**、**3 个小说拆分模版**，`user_id IS NULL` 表示系统内置、全局共享。
+- **模型目录数据**（admin「模型目录价」页）随仓库快照 `docker/model-catalog-data.sql` 发布：`mysql drama_mill < docker/model-catalog-data.sql` 一次导入（按主键 upsert 幂等可重跑）；Docker 部署则由 compose 在 MySQL 首次初始化时自动加载。
 
 ### 🔑 首次使用
 
@@ -321,7 +323,7 @@ server {
 
 ### 🐳 Docker（备选）
 
-仓库保留 `Dockerfile` + `docker-compose.yml`（应用 + MySQL 8.4 + 健康检查）。多阶段构建镜像仍以 `node:20-slim` 为基础，而运行时要求 Node 22+，使用 Docker 部署前请先升级镜像基础层，或优先采用上面的 PM2 一键部署路径。
+仓库保留 `Dockerfile` + `docker-compose.yml`（应用 + MySQL 8.4 + 健康检查）。MySQL 数据卷首次初始化时自动执行 `docker/init.sql`（建表+种子）与 `docker/model-catalog-data.sql`（模型目录快照），开箱即带全部基础数据。多阶段构建镜像仍以 `node:20-slim` 为基础，而运行时要求 Node 22+，使用 Docker 部署前请先升级镜像基础层，或优先采用上面的 PM2 一键部署路径。
 
 ### 🧮 常用检查命令
 

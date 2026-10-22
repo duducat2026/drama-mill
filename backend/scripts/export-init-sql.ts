@@ -47,18 +47,18 @@ function inlineParams(text: string, values: unknown[]): string {
   return filled
 }
 
-const bar = '-'.repeat(76)
+const bar = '-- ' + '-'.repeat(72)
 const pieces: string[] = []
 
-// 文件头：来源说明 + 生成时间戳
+// 文件头：来源说明 + 生成时间戳（分隔行必须带 -- 注释前缀，否则 mysql 客户端整跑报错）
 pieces.push([
-  '='.repeat(76),
+  '-- ' + '='.repeat(72),
   '-- Drama Mill 数据库初始化脚本（生成物，请勿手改）',
   '-- 来源: backend/src/db/mysql-schema.ts',
   '-- 导出: backend/scripts/export-init-sql.ts',
   `-- 时间: ${new Date().toISOString()}`,
   '-- 说明: 应用启动自带幂等初始化，本脚本仅用于审核/预建表',
-  '='.repeat(76),
+  '-- ' + '='.repeat(72),
   '',
   'SET NAMES utf8mb4;',
 ].join('\n'))

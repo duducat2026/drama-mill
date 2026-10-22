@@ -49,6 +49,10 @@ services:
       - --collation-server=utf8mb4_unicode_ci
     volumes:
       - mysql-data:/var/lib/mysql
+      # MySQL 数据卷首次初始化时按文件名顺序自动执行（已有卷不重跑）：
+      # 01 建表与内置种子，02 模型目录数据快照（下载即用，无需外部采集库）
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./docker/model-catalog-data.sql:/docker-entrypoint-initdb.d/02-model-catalog-data.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pdrama-mill_root"]
       interval: 5s

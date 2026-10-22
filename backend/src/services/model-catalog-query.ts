@@ -27,7 +27,7 @@ export class CatalogUnavailable extends Error {}
 async function guardInitialized(): Promise<void> {
   const [row] = await db.select({ c: sql<number>`COUNT(*)` }).from(M)
   if (!Number(row?.c)) {
-    throw new CatalogUnavailable('模型目录表尚未初始化：请运行 backend/scripts/migrate-model-catalog.ts 将目录数据收编进主库')
+    throw new CatalogUnavailable('模型目录表尚未初始化：请导入仓库自带快照 docker/model-catalog-data.sql（或在有采集库的环境运行 backend/scripts/migrate-model-catalog.ts）')
   }
 }
 

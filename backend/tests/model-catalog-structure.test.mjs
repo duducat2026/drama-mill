@@ -52,6 +52,29 @@ test('目录表收编 schema/DDL/init.sql，迁移脚本按 id upsert 幂等且�
   assert.doesNotMatch(mig, /'raw_json'|'price_raw'|'inference_metadata_raw'/)
 })
 
+test('目录数据快照随仓库发布：data.sql 自含 DDL + 幂等 upsert，compose 首启自动加载', () => {
+  const data = read('../docker/model-catalog-data.sql')
+  // 自含建表：可先于应用启动导入
+  assert.match(data, /CREATE TABLE IF NOT EXISTS model_catalog_models/)
+  assert.match(data, /CREATE TABLE IF NOT EXISTS model_catalog_prices/)
+  // 两表数据均按主键 id upsert，幂等可重跑
+  assert.match(data, /INSERT INTO `model_catalog_models`/)
+  assert.match(data, /INSERT INTO `model_catalog_prices`/)
+  assert.match(data, /ON DUPLICATE KEY UPDATE/)
+
+  const exp = read('scripts/export-catalog-sql.ts')
+  assert.match(exp, /model-catalog-data\.sql/)
+  assert.match(exp, /ON DUPLICATE KEY UPDATE/)
+
+  const compose = read('../docker-compose.yml')
+  assert.match(compose, /init\.sql:\/docker-entrypoint-initdb\.d\/01-init\.sql/)
+  assert.match(compose, /model-catalog-data\.sql:\/docker-entrypoint-initdb\.d\/02-model-catalog-data\.sql/)
+
+  // 503 引导文案指向快照导入（GitHub 下载者无外部采集库可迁）
+  const svc = readModelCatalogSources(root)
+  assert.match(svc, /docker\/model-catalog-data\.sql/)
+})
+
 test('模型目录价接口：admin 守卫下的四个只读端点', () => {
   const admin = readAdminSources(new URL('..', import.meta.url))
   assert.match(admin, /from '\.\.\/\.\.\/services\/model-catalog\.js'/)

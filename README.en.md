@@ -43,6 +43,7 @@ backend/                     — Hono + Drizzle ORM + mysql2 + Mastra AI Agents
 backend/workspace/skills/    — Agent skill definitions (SKILL.md, editable online from Settings)
 data/static/                 — generated images / videos / composites (local file storage)
 docker/init.sql              — pre-built schema + built-in seeds (29 style presets, 3 novel-split templates, optional)
+docker/model-catalog-data.sql — model catalog data snapshot (~2,500 models / 10,000+ price rows, import and go)
 deployment/                  — one-click deploy, cloud publish, disk monitor, root ops scripts
 nginx/                       — reverse-proxy templates (SSE buffering off, /static served from disk, large uploads)
 ```
@@ -212,9 +213,10 @@ Tables are created automatically on first launch (idempotent — initialization 
 DATABASE_URL=mysql://dramamill:dramamill_tool@127.0.0.1:3306/drama_mill npm start
 ```
 
-- **27 tables** in total, covering dramas / episodes / storyboards / assets / tasks / AI configs / styles / usage / audit, etc.
+- **30 tables** in total, covering dramas / episodes / storyboards / assets / tasks / AI configs / styles / usage / audit / model catalog, etc.
 - To pre-create the schema outside the app (e.g. DBA review), use `docker/init.sql`; after schema changes, regenerate it with `npx tsx scripts/export-init-sql.ts` inside `backend/`.
 - Built-in seeds (idempotent row insertion, never overwriting user edits): **29 comic-drama style presets** and **3 novel-split templates**; `user_id IS NULL` marks them as system-built and globally shared.
+- **Model catalog data** (the admin "Model Catalog Prices" page) ships as the repo snapshot `docker/model-catalog-data.sql`: import once with `mysql drama_mill < docker/model-catalog-data.sql` (primary-key upsert, safe to re-run); with Docker, compose loads it automatically during MySQL's first initialization.
 
 ### 🔑 First Use
 
@@ -321,7 +323,7 @@ server {
 
 ### 🐳 Docker (alternative)
 
-The repo keeps `Dockerfile` + `docker-compose.yml` (app + MySQL 8.4 + health checks). The multi-stage image is still based on `node:20-slim`, while the runtime requires Node 22+ — upgrade the image base layer before deploying with Docker, or prefer the PM2 one-click path above.
+The repo keeps `Dockerfile` + `docker-compose.yml` (app + MySQL 8.4 + health checks). On the MySQL volume's first initialization, compose automatically runs `docker/init.sql` (schema + seeds) and `docker/model-catalog-data.sql` (model catalog snapshot), so the database ships fully pre-loaded. The multi-stage image is still based on `node:20-slim`, while the runtime requires Node 22+ — upgrade the image base layer before deploying with Docker, or prefer the PM2 one-click path above.
 
 ### 🧮 Handy Checks
 
