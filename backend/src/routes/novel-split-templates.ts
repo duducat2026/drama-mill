@@ -23,12 +23,23 @@
 import { Hono } from 'hono'
 import { eq, and, isNull, or } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
+import { createTtlListCache } from '../services/ttl-cache.js'
 import { success, created, badRequest, notFound, now } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 
 const app = new Hono()
 
 const VALUE_PATTERN = /^[a-z0-9][a-z0-9-]*$/
+
+type TemplateRow = typeof schema.novelSplitTemplates.$inferSelect
+
+// 模版全表 60s TTL 缓存：拆分/生产入口每批次都读，表小且极少改；两侧 CRUD 写后显式失效
+const templateCache = createTtlListCache<TemplateRow>(() => db.select().from(schema.novelSplitTemplates))
+
+/** 模版增删改后调用（用户侧与 admin 侧共用）：清掉 60s 快照 */
+export function invalidateSplitTemplateCache() {
+  templateCache.invalidate()
+}
 
 /** 拆分方式白名单：chars 按字数归组 / paragraphs 按段落数归组（诗词/笑话推荐） */
 function normalizeSplitMode(v: unknown): 'chars' | 'paragraphs' {
@@ -45,10 +56,9 @@ function canModify(row: typeof schema.novelSplitTemplates.$inferSelect, user: { 
   return row.userId === user.id
 }
 
-/** 校验并取回可用模版：仅系统内置或本人私有且启用；供拆分入口复用 */
+/** 校验并取回可用模版：仅系统内置或本人私有且启用；供拆分入口复用（走全表缓存） */
 export async function getTemplateUsable(templateId: number, user: { id: number; role: string }) {
-  const [row] = await db.select().from(schema.novelSplitTemplates)
-    .where(eq(schema.novelSplitTemplates.id, templateId))
+  const row = (await templateCache.get()).find(r => r.id === templateId)
   if (!row || !row.isActive) return null
   if (row.userId === null || row.userId === user.id) return row
   return null
@@ -58,9 +68,9 @@ export async function getTemplateUsable(templateId: number, user: { id: number; 
 app.get('/', async (c) => {
   const user = c.get('user')
   const all = c.req.query('all') === '1'
-  const rows = await db.select().from(schema.novelSplitTemplates)
-    .where(or(isNull(schema.novelSplitTemplates.userId), eq(schema.novelSplitTemplates.userId, user.id)))
-  const filtered = all ? rows : rows.filter(r => r.isActive)
+  const rows = (await templateCache.get())
+    .filter(r => r.userId === null || r.userId === user.id)
+  const filtered = all ? rows.slice() : rows.filter(r => r.isActive)
   filtered.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || a.id - b.id)
   return success(c, filtered.map(toDto))
 })
@@ -102,6 +112,7 @@ app.post('/', async (c) => {
   })
   const [row] = await db.select().from(schema.novelSplitTemplates)
     .where(eq(schema.novelSplitTemplates.id, getInsertId(res)))
+  invalidateSplitTemplateCache()
   return created(c, toDto(row))
 })
 
@@ -140,6 +151,7 @@ app.put('/:id', async (c) => {
     .where(eq(schema.novelSplitTemplates.id, id))
   const [updated] = await db.select().from(schema.novelSplitTemplates)
     .where(eq(schema.novelSplitTemplates.id, id))
+  invalidateSplitTemplateCache()
   return success(c, toDto(updated))
 })
 
@@ -151,6 +163,7 @@ app.delete('/:id', async (c) => {
     .where(eq(schema.novelSplitTemplates.id, id))
   if (!row || !canModify(row, user)) return notFound(c, '模版不存在')
   await db.delete(schema.novelSplitTemplates).where(eq(schema.novelSplitTemplates.id, id))
+  invalidateSplitTemplateCache()
   return success(c)
 })
 

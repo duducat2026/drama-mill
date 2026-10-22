@@ -22,6 +22,7 @@ import { badRequest, notFound, now, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
 import { and, eq, isNull } from 'drizzle-orm'
 import { userMap } from './shared.js'
+import { invalidateSplitTemplateCache } from '../novel-split-templates.js'
 
 const app = new Hono()
 
@@ -82,6 +83,7 @@ app.post('/novel-split-templates', async (c) => {
     updatedAt: ts,
   })
   const [row] = await db.select().from(schema.novelSplitTemplates).where(eq(schema.novelSplitTemplates.id, getInsertId(res)))
+  invalidateSplitTemplateCache()
   return success(c, templateDto(row))
 })
 
@@ -110,6 +112,7 @@ app.put('/novel-split-templates/:id', async (c) => {
   if (body.is_active !== undefined) updates.isActive = !(body.is_active === false || body.is_active === 0)
   await db.update(schema.novelSplitTemplates).set(updates).where(eq(schema.novelSplitTemplates.id, id))
   const [updated] = await db.select().from(schema.novelSplitTemplates).where(eq(schema.novelSplitTemplates.id, id))
+  invalidateSplitTemplateCache()
   return success(c, templateDto(updated))
 })
 
@@ -119,6 +122,7 @@ app.delete('/novel-split-templates/:id', async (c) => {
   const [row] = await db.select().from(schema.novelSplitTemplates).where(eq(schema.novelSplitTemplates.id, id))
   if (!row) return notFound(c, '模版不存在')
   await db.delete(schema.novelSplitTemplates).where(eq(schema.novelSplitTemplates.id, id))
+  invalidateSplitTemplateCache()
   return success(c, { id })
 })
 

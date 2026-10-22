@@ -61,10 +61,12 @@ test('style presets are tenant-scoped with protected system rows', () => {
   assert.match(route, /userId: isSystem \? null : user\.id/)
   assert.match(route, /is_system: r\.userId === null/)
 
-  // 消费端：按项目属主匹配，私有风格优先于同名内置风格
-  assert.match(service, /isNull\(schema\.stylePresets\.userId\)/)
-  assert.match(service, /desc\(schema\.stylePresets\.userId\)/)
-  assert.match(service, /drama\.userId/)
+  // 消费端：预设全表走 60s TTL 缓存（生图提示词高频路径），按项目属主匹配，私有风格优先于同名内置（NULL）
+  assert.match(service, /createTtlListCache/)
+  assert.match(service, /p\.value === drama\.style && \(p\.userId === null \|\| p\.userId === drama\.userId\)/)
+  assert.match(service, /visible\.find\(p => p\.userId !== null\) \|\| visible\.find\(p => p\.userId === null\)/)
+  // 写侧三端点（POST/PUT/DELETE）均显式失效，改完立刻可见新值
+  assert.equal((route.match(/invalidateStylePresetCache\(\)/g) || []).length, 3)
 })
 
 test('drama style prompt is injected into image prompt composition', () => {
@@ -74,7 +76,7 @@ test('drama style prompt is injected into image prompt composition', () => {
   const assetImages = read('src/services/asset-images.ts')
 
   assert.match(service, /getDramaStylePrompt/)
-  assert.match(service, /stylePresets\.value, drama\.style/)
+  assert.match(service, /p\.value === drama\.style/)
   assert.match(gridTools, /getDramaStylePrompt\(dramaId\)/)
   // 保存最终提示词时由工具拼接项目视觉风格（风格片段置于最前方）
   assert.match(gridTools, /stylePrompt \? `\$\{stylePrompt\}, \$\{prompt\}` : prompt/)

@@ -23,6 +23,7 @@
 import { Hono } from 'hono'
 import { eq, and, isNull, or } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
+import { invalidateStylePresetCache } from '../services/style-preset.js'
 import { success, created, badRequest, notFound, now } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 
@@ -87,6 +88,7 @@ app.post('/', async (c) => {
   })
   const [row] = await db.select().from(schema.stylePresets)
     .where(eq(schema.stylePresets.id, getInsertId(res)))
+  invalidateStylePresetCache()
   return created(c, toPresetDto(row))
 })
 
@@ -112,6 +114,7 @@ app.put('/:id', async (c) => {
   }
   await db.update(schema.stylePresets).set(updates)
     .where(eq(schema.stylePresets.id, id))
+  invalidateStylePresetCache()
   return success(c)
 })
 
@@ -123,6 +126,7 @@ app.delete('/:id', async (c) => {
     .where(eq(schema.stylePresets.id, id))
   if (!row || !canModify(row, user)) return notFound(c, '风格预设不存在')
   await db.delete(schema.stylePresets).where(eq(schema.stylePresets.id, id))
+  invalidateStylePresetCache()
   return success(c)
 })
 
