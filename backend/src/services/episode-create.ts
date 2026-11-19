@@ -23,7 +23,7 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
-import { getActiveConfigId } from './ai.js'
+import { getActiveConfigId, isConfigOwnedBy } from './ai.js'
 
 export interface CreateEpisodeOpts {
   title?: string
@@ -44,7 +44,14 @@ export interface CreatedEpisode {
 }
 
 export async function createEpisode(dramaId: number, opts: CreateEpisodeOpts = {}, userId?: number): Promise<CreatedEpisode> {
-  // 建集锁定配置只在该用户启用的配置中选（userId 缺省退回全量，兼容历史链路）
+  // 显式锁定的配置必须归属调用者：否则后续生成会静默拿他人的密钥与配额计费
+  if (opts.imageConfigId != null && !await isConfigOwnedBy(opts.imageConfigId, userId)) {
+    throw new Error('锁定的图片生成配置不存在或无权使用')
+  }
+  if (opts.videoConfigId != null && !await isConfigOwnedBy(opts.videoConfigId, userId)) {
+    throw new Error('锁定的视频生成配置不存在或无权使用')
+  }
+  // 建集锁定配置只在该用户启用的配置中选（无 userId 时不选配置，绝不回退到他人配置）
   const imageConfigId = opts.imageConfigId ?? await getActiveConfigId('image', userId)
   const videoConfigId = opts.videoConfigId ?? await getActiveConfigId('video', userId)
   if (!imageConfigId) throw new Error('未找到启用的图片生成配置，请先在设置中心添加')

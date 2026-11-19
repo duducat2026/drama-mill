@@ -14,19 +14,27 @@ import {
   resolveCategoryPath,
   staticRelPath,
 } from './storage-core.js'
+import { assertSafeOutboundUrl, fetchWithSafeRedirects } from './url-validator.js'
+
+// 远程下载落盘的扩展名白名单：上游可返回任意路径，未知类型统一落 .bin（按二进制流下发，不会被同源执行）
+const SAFE_MEDIA_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.mov', '.webm', '.m4v'])
 
 /**
  * 下载远程文件到本地存储
  */
 export async function downloadFile(url: string, subDir: string, nestedPath = ''): Promise<string> {
+  // 出网校验：上游（可由用户自配 base_url 决定）返回的地址先过私网/协议拦截
+  await assertSafeOutboundUrl(url)
+
   const dir = resolveCategoryPath(subDir, nestedPath)
   fs.mkdirSync(dir, { recursive: true })
 
-  const ext = getExtFromUrl(url)
-  const filename = `${uuid()}${ext}`
+  const ext = getExtFromUrl(url).toLowerCase()
+  const safeExt = SAFE_MEDIA_EXT.has(ext) ? ext : '.bin'
+  const filename = `${uuid()}${safeExt}`
   const filePath = path.join(dir, filename)
 
-  const resp = await fetch(url)
+  const resp = await fetchWithSafeRedirects(url)
   if (!resp.ok) throw new Error(`Download failed: ${resp.status}`)
 
   const buffer = Buffer.from(await resp.arrayBuffer())

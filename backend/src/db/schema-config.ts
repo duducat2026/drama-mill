@@ -186,6 +186,8 @@ export const users = mysqlTable('users', {
   // 看门狗用户侧授权（默认 0 = 不启动）：未开启的用户不参与自动重提/自动补图，避免后台悄悄产生费用
   retryWatchdogEnabled: boolean('retry_watchdog_enabled').default(false),
   assetWatchdogEnabled: boolean('asset_watchdog_enabled').default(false),
+  // token 版本号（默认 0）：改密/登出/管理员重置口令时 +1，鉴权中间件比对不一致即判旧 token 失效
+  tokenVersion: int('token_version').notNull().default(0),
   lastLoginAt: varchar('last_login_at', { length: 64 }),
   createdAt: varchar('created_at', { length: 64 }).notNull(),
   updatedAt: varchar('updated_at', { length: 64 }).notNull(),

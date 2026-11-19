@@ -85,6 +85,9 @@ export async function ensureSchemaColumns(pool: Pool) {
   await ensureColumn(pool, 'users', 'retry_watchdog_enabled', 'retry_watchdog_enabled TINYINT(1) NOT NULL DEFAULT 0')
   await ensureColumn(pool, 'users', 'asset_watchdog_enabled', 'asset_watchdog_enabled TINYINT(1) NOT NULL DEFAULT 0')
 
+  // 1.553) users 补 token 版本号列（默认 0）：改密/登出/管理员重置口令时递增，旧 token 立即失效
+  await ensureColumn(pool, 'users', 'token_version', 'token_version INT NOT NULL DEFAULT 0')
+
   // 1.56) 风格预设多租户：补 user_id 列（NULL = 系统内置，全局共享）；
   // 旧全局唯一索引 uk_style_presets_value 放开为按租户隔离的 (value, user_id)，
   // 系统内置行（user_id NULL）不受唯一约束，查重由路由层完成

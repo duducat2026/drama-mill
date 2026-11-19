@@ -15,12 +15,14 @@ import type { AuthUser } from '../services/auth.js'
 export type TaskType = 'image' | 'video'
 
 /** 任务归属：经任务所属项目间接校验；无项目但落了 user_id 的任务（设置页生成测试等）按本人归属校验；
- *  两者都没有的历史任务放行 */
+ *  项目与 user_id 双 NULL 的历史行无法判定归属，按不存在处理（不再放行） */
 export async function getTaskOwned(id: number, user: AuthUser) {
   const [row] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
   if (!row) throw new OwnershipError(404, '任务不存在')
   if (row.dramaId) await getDramaOwned(row.dramaId, user)
   else if (row.userId != null && row.userId !== user.id) throw new OwnershipError(404, '任务不存在')
+  // 双 NULL 行兜底：无项目也未落 user_id，归属不可判定
+  if (!row.dramaId && row.userId == null) throw new OwnershipError(404, '任务不存在')
   return row
 }
 

@@ -5,7 +5,7 @@
 #   PIP_INDEX     python 包源，默认清华（当前仅预置配置供未来使用）
 
 # ---------- 阶段 1：前端静态产物 ----------
-FROM node:20-slim AS web
+FROM node:22-slim AS web
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN npm config set registry "${NPM_REGISTRY}"
@@ -17,7 +17,7 @@ COPY frontend/ ./
 RUN npm run generate
 
 # ---------- 阶段 2：后端生产依赖（含原生模块编译） ----------
-FROM node:20-slim AS native
+FROM node:22-slim AS native
 
 ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
 ARG NPM_REGISTRY=https://registry.npmmirror.com
@@ -42,10 +42,10 @@ COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---------- 阶段 3：运行时（tsx 直跑 TS，ffmpeg 由 npm 包自带二进制） ----------
-FROM node:20-slim
+FROM node:22-slim
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-RUN npm config set registry "${NPM_REGISTRY}" && npm i -g tsx
+RUN npm config set registry "${NPM_REGISTRY}" && npm i -g tsx@4.21.0
 
 WORKDIR /app
 COPY --from=native /src/backend/node_modules ./backend/node_modules
@@ -55,9 +55,13 @@ COPY backend/src ./backend/src
 COPY backend/workspace/skills/ ./backend/workspace/skills/
 COPY --from=web /src/frontend/.output/public ./frontend/dist
 
-RUN mkdir -p data/static
+# 素材目录与 skills 工作区需要运行期写入，交给非 root 的 node 用户
+RUN mkdir -p data/static \
+ && chown -R node:node /app/data /app/backend/workspace
 ENV NODE_ENV=production PORT=5679
 EXPOSE 5679
 VOLUME /app/data
 
+# 非 root 运行：容器逃逸/漏洞利用后的权限面和持久化能力都更小
+USER node
 CMD ["tsx", "backend/src/index.ts"]

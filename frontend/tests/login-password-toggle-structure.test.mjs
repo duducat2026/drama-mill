@@ -31,12 +31,12 @@ test('切换按钮不破坏登录表单语义', () => {
   assert.match(login, /\.login-pwd \.input \{ padding-right: 34px; \}/)
 })
 
-test('登录页仅提示普通用户默认账号（管理员账号只记录于 README）', () => {
-  assert.match(login, /首次部署默认账号/)
-  // 普通用户 test / drama-mill
-  assert.match(login, /<code>test<\/code><span>\/<\/span><code>drama-mill<\/code>/)
-  // 出于安全，管理员凭证行（drama-mill / drama-mill）不得出现在登录页
-  assert.doesNotMatch(login, /<code>drama-mill<\/code><span>\/<\/span><code>drama-mill<\/code>/)
-  // 提示必须引导用户使用后立即改密
-  assert.match(login, /修改密码/)
+test('登录页不展示任何默认账号/口令提示（种子口令已改随机生成）', () => {
+  // F-02：种子口令改为每次进程启动随机生成，登录页不再泄露任何默认凭证
+  assert.doesNotMatch(login, /首次部署默认账号/)
+  assert.doesNotMatch(login, /默认账号|默认口令|默认密码/)
+  // 不得出现任何账号/口令组合的代码提示（如 test / drama-mill、drama-mill / drama-mill）
+  assert.doesNotMatch(login, /<code>[^<]*<\/code><span>\/<\/span><code>[^<]*<\/code>/)
+  // 不得引导用户按仓库里的旧口令登录
+  assert.doesNotMatch(login, /drama-mill<\/code>/)
 })

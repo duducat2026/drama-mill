@@ -186,6 +186,7 @@ export async function handleImageCompleteBase64(record: SysTaskRecord, base64Dat
 }
 
 // 图片完成后回写业务表：分镜(按 frameType)、角色、场景、道具
+// 回写只按任务记录里的资产 ID 执行，不重复校验归属：安全性依赖建任务入口的归属校验（POST /tasks 已逐项校验）
 export async function writeBackImageAssets(record: SysTaskRecord, localPath: string) {
   const params = parseTaskParams(record.params)
   if (record.storyboardId) {

@@ -27,7 +27,9 @@ test('seed users include platform admin and regular account', () => {
   assert.match(migrations, /SEED_USERS/)
   assert.match(migrations, /username: 'drama-mill'/)
   assert.match(migrations, /username: 'test'/)
-  assert.match(migrations, /password: 'drama-mill'/)
+  // F-02：种子口令不再硬编码默认值，改为每次进程启动 crypto.randomBytes(16) 随机生成 32 位 hex
+  assert.match(migrations, /password: crypto\.randomBytes\(16\)\.toString\('hex'\)/)
+  assert.doesNotMatch(migrations, /password: 'drama-mill'/)
   assert.match(migrations, /role: 'admin'/)
   // 旧账号名 adimin 幂等重命名为 admin（存量库兼容）
   assert.match(migrations, /renameLegacyAdmin/)

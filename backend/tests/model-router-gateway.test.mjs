@@ -122,10 +122,13 @@ test('探测改打真实生成端点：不再依赖网关未必实现的 GET /v1
   assert.match(route, /missing from request\|invalid model format\|invalid_request_error/i)
 })
 
-test('视频选模对 model-router 只做素材兼容过滤（网关没有百炼在途查询接口）', () => {
+test('视频选模对无在途量查询接口的网关只做素材兼容过滤', () => {
   const gen = readGenerationSources(root)
-  assert.match(gen, /if \(config\.provider !== 'dashscope' && config\.provider !== 'model-router'\) return fallback/)
-  const mrBlock = gen.slice(gen.indexOf("if (config.provider === 'model-router') {"), gen.indexOf('const candidates = models'))
+  // Model Router / Token Plan 同属「只过滤不探负载」类，名单集中一处声明
+  assert.match(gen, /const MEDIA_FILTER_ONLY_PROVIDERS = \['model-router', 'token-plan'\]/)
+  assert.match(gen, /const mediaFilterOnly = MEDIA_FILTER_ONLY_PROVIDERS\.includes\(config\.provider\)/)
+  assert.match(gen, /if \(config\.provider !== 'dashscope' && !mediaFilterOnly\) return fallback/)
+  const mrBlock = gen.slice(gen.indexOf('if (mediaFilterOnly) {'), gen.indexOf('const candidates = models'))
   assert.ok(mrBlock.length > 0)
   // 不探负载：不得在该分支里调用在途查询
   assert.doesNotMatch(mrBlock, /upstreamInflightCount/)

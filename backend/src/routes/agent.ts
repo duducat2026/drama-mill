@@ -26,7 +26,7 @@ import { buildAgentRequestContext } from '../agents/context.js'
 import { mastra } from '../mastra/index.js'
 import { success, badRequest } from '../utils/response.js'
 import { normalizeToolName, normalizeToolResult } from '../services/agent-run.js'
-import { getDramaOwned, getEpisodeOwned } from '../services/ownership.js'
+import { getDramaOwned, assertEpisodeInDrama } from '../services/ownership.js'
 import { recordTextUsageFromResult } from '../services/cost.js'
 import { resolveTextConfigMeta } from '../services/ai.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
@@ -65,6 +65,8 @@ app.post('/:type/chat', async (c) => {
     return badRequest(c, 'drama_id and episode_id are required')
   }
   await getDramaOwned(Number(drama_id), user)
+  // 剧集必须归属当前用户且属于该项目：只校验项目会被「自己的项目 ID + 他人剧集 ID」绕过
+  await assertEpisodeInDrama(Number(episode_id), Number(drama_id), user)
 
   const agent = mastra.getAgent(agentType)
   if (!agent) {

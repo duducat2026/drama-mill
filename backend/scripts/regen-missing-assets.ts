@@ -50,7 +50,8 @@ async function main() {
   const ownerByDrama = new Map(dramas.map(d => [d.id, d.userId as number]))
   const epById = new Map(eps.map(e => [e.id, e]))
   const allUsers = await db.select().from(schema.users)
-  const tokenByUser = new Map(allUsers.map(u => [u.id, signToken({ id: u.id, username: u.username!, role: u.role as 'user' | 'admin', nickname: u.nickname ?? null })]))
+  // token 需带当前 tokenVersion：用户改密/登出后版本已递增，带旧版本会被鉴权中间件判为登录失效
+  const tokenByUser = new Map(allUsers.map(u => [u.id, signToken({ id: u.id, username: u.username!, role: u.role as 'user' | 'admin', nickname: u.nickname ?? null, aiCallEnabled: u.aiCallEnabled !== false, tokenVersion: u.tokenVersion || 0 })]))
   const headersFor = (episodeId: number) => {
     const ep = epById.get(episodeId)
     const ownerId = ep ? ownerByDrama.get(ep.dramaId) : undefined

@@ -36,8 +36,9 @@ type CharacterRow = typeof schema.characters.$inferSelect
 type SceneRow = typeof schema.scenes.$inferSelect
 type PropRow = typeof schema.props.$inferSelect
 
-/** 顶栏选择的文本模型/配置覆盖（不传则跟随 Agent 与文本配置默认） */
-export interface PromptAgentOptions { model?: string; configId?: number }
+/** 顶栏选择的文本模型/配置覆盖（不传则跟随 Agent 与文本配置默认）；
+ *  userId 把模型/配置解析限定在调用者自己的配置上：缺失时只能走 Agent 默认，绝不下探他人配置 */
+export interface PromptAgentOptions { model?: string; configId?: number; userId?: number }
 
 /** 驱动 prompt_generator 完成一次创作会话 */
 async function runPromptAgent(episodeId: number, dramaId: number, message: string, opts?: PromptAgentOptions) {
@@ -48,6 +49,7 @@ async function runPromptAgent(episodeId: number, dramaId: number, message: strin
     requestContext: buildAgentRequestContext({
       episodeId,
       dramaId,
+      userId: opts?.userId,
       modelOverride: opts?.model || undefined,
       textConfigId: opts?.configId || undefined,
     }),

@@ -81,8 +81,13 @@ export function redactUrl(rawUrl: string) {
 }
 
 // 命中即整值打码的字段名（精确）与关键字（子串，先转小写再比）
-const MASKED_EXACT = ['authorization', 'api_key', 'apikey', 'apiKey', 'token', 'access_token']
-const MASKED_HINTS = ['authorization', 'token', 'apikey', 'api_key']
+// api-key / x-goog-api-key：Gemini 系列以该请求头携带 Key，旧的短名单匹配不到带连字符的头名；
+// secret / password：口令与各类 secret 字段同样不得原样进日志
+const MASKED_EXACT = [
+  'authorization', 'api_key', 'apikey', 'apiKey', 'token', 'access_token',
+  'api-key', 'x-goog-api-key', 'secret', 'password',
+]
+const MASKED_HINTS = ['authorization', 'token', 'apikey', 'api_key', 'api-key', 'secret', 'password']
 // 命中即头尾截断的 base64/大载荷字段关键字
 const BLOB_HINTS = ['base64', 'audiohex', 'inline']
 
@@ -96,8 +101,10 @@ function sanitizeValue(value: unknown): unknown {
   const cleaned: Record<string, unknown> = {}
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     const lower = key.toLowerCase()
+    // 忽略分隔符归一化：x-goog-api-key → xgoogapikey，统一命中 apikey 类关键字
+    const compact = lower.replace(/[-_\s]/g, '')
     if (MASKED_EXACT.includes(key) || MASKED_EXACT.includes(lower)
-      || MASKED_HINTS.some(hint => lower.includes(hint))) {
+      || MASKED_HINTS.some(hint => compact.includes(hint.replace(/[-_\s]/g, '')))) {
       cleaned[key] = '***'
       continue
     }

@@ -36,10 +36,19 @@ const hostNotConfigured = !process.env.DATABASE_URL && !process.env.MYSQL_HOST
 function resolveDatabaseUrl(): string {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL
 
+  // 不再内置默认账号口令：示例口令一旦随镜像/仓库外流，公网实例相当于无鉴权。
+  // 分项配置路径必须显式提供 MYSQL_USER 与 MYSQL_PASSWORD，否则直接拒绝启动。
+  const MYSQL_USER = process.env.MYSQL_USER
+  const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD
+  if (!MYSQL_USER || !MYSQL_PASSWORD) {
+    console.error('[FATAL] MYSQL_USER 或 MYSQL_PASSWORD 未配置，拒绝启动')
+    process.exit(1)
+  }
+
   const host = process.env.MYSQL_HOST || (insideContainer ? 'host.docker.internal' : '127.0.0.1')
   const port = process.env.MYSQL_PORT || '3306'
-  const user = encodeURIComponent(process.env.MYSQL_USER || 'dramamill')
-  const pass = encodeURIComponent(process.env.MYSQL_PASSWORD || 'dramamill_tool')
+  const user = encodeURIComponent(MYSQL_USER)
+  const pass = encodeURIComponent(MYSQL_PASSWORD)
   const database = process.env.MYSQL_DATABASE || 'drama_mill'
   return `mysql://${user}:${pass}@${host}:${port}/${database}`
 }

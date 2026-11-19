@@ -49,6 +49,9 @@ export function maskSecrets(text: string): string {
     `${key}${'*'.repeat(value.length)}${quote}`)
 }
 
+/** 请求体超过这个体积就不进日志：clone().text() 会把整个 body 读进内存 */
+const BODY_LOG_MAX = 1024 * 1024 // 1MB
+
 /**
  * 全局日志中间件 — 打印请求方法/路径/状态/耗时/请求体
  */
@@ -62,13 +65,23 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
   let bodyInfo = ''
   if (['POST', 'PUT', 'PATCH'].includes(method)) {
     try {
-      const clone = c.req.raw.clone()
-      const text = await clone.text()
-      if (text) {
-        // 先脱敏再截断：避免登录/改密/模型配置的凭证明文落盘到共享日志
-        const masked = maskSecrets(text)
-        const truncated = masked.length > 500 ? masked.slice(0, 500) + '...' : masked
-        bodyInfo = `\n  ${colors.dim}body: ${truncated}${colors.reset}`
+      const contentType = c.req.header('Content-Type') || ''
+      const contentLength = parseInt(c.req.header('Content-Length') || '0', 10)
+      if (contentType.startsWith('multipart/form-data')) {
+        // 文件上传：二进制打出来既是乱码又白占内存，只标注类型
+        bodyInfo = `\n  ${colors.dim}body: [multipart/form-data, binary skipped]${colors.reset}`
+      } else if (Number.isFinite(contentLength) && contentLength > BODY_LOG_MAX) {
+        // 大体积请求体：只记体积不读内容，避开内存放大（与 bodyLimit 双保险）
+        bodyInfo = `\n  ${colors.dim}body: [${(contentLength / 1024 / 1024).toFixed(1)}MB, skipped]${colors.reset}`
+      } else {
+        const clone = c.req.raw.clone()
+        const text = await clone.text()
+        if (text) {
+          // 先脱敏再截断：避免登录/改密/模型配置的凭证明文落盘到共享日志
+          const masked = maskSecrets(text)
+          const truncated = masked.length > 500 ? masked.slice(0, 500) + '...' : masked
+          bodyInfo = `\n  ${colors.dim}body: ${truncated}${colors.reset}`
+        }
       }
     } catch {}
   }

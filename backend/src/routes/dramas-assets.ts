@@ -21,7 +21,7 @@
  * 路径按注册顺序生效：/:id/assets-status 先于门面 dramas.ts 的 /:id 通配路由
  */
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, now } from '../utils/response.js'
 import { getDramaOwned } from '../services/ownership.js'
@@ -45,6 +45,22 @@ app.get('/:id/assets-status', async (c) => {
   return success(c, { characters: slim(chars), scenes: slim(scns), props: slim(prps) })
 })
 
+// 批量保存可写字段白名单：请求体里的 id / dramaId / deletedAt 等一律不接，
+// 否则一次 PUT 就能改他人行或伪造归属
+const CHAR_FIELDS = ['name', 'description', 'role', 'appearance', 'styling', 'imageUrl', 'finalPrompt'] as const
+const EP_FIELDS = ['title', 'episodeNumber', 'content', 'scriptContent', 'imageConfigId', 'videoConfigId', 'resolution', 'status'] as const
+
+/** 按白名单取字段（camel 优先、snake 兜底），只返回显式传入的项 */
+function pickFields(src: any, fields: readonly string[]) {
+  const out: Record<string, any> = {}
+  for (const f of fields) {
+    const snake = f.replace(/[A-Z]/g, m => '_' + m.toLowerCase())
+    const v = src[f] !== undefined ? src[f] : src[snake]
+    if (v !== undefined) out[f] = v
+  }
+  return out
+}
+
 // PUT /dramas/:id/characters - Save characters
 app.put('/:id/characters', async (c) => {
   const user = c.get('user')
@@ -55,10 +71,13 @@ app.put('/:id/characters', async (c) => {
   const ts = now()
 
   for (const char of chars) {
+    const updates = pickFields(char, CHAR_FIELDS)
     if (char.id) {
-      await db.update(schema.characters).set({ ...char, updatedAt: ts }).where(eq(schema.characters.id, char.id))
+      // 更新必须同时约束 id 与 dramaId：只按 id 改会越权改写到他人项目
+      await db.update(schema.characters).set({ ...updates, updatedAt: ts })
+        .where(and(eq(schema.characters.id, char.id), eq(schema.characters.dramaId, dramaId)))
     } else {
-      await db.insert(schema.characters).values({ ...char, dramaId, createdAt: ts, updatedAt: ts })
+      await db.insert(schema.characters).values({ ...updates, name: updates.name ?? '', dramaId, createdAt: ts, updatedAt: ts })
     }
   }
   return success(c)
@@ -74,14 +93,16 @@ app.put('/:id/episodes', async (c) => {
   const ts = now()
 
   for (const ep of episodes) {
+    const values = pickFields(ep, EP_FIELDS)
     if (ep.id) {
-      await db.update(schema.episodes).set({ ...ep, updatedAt: ts }).where(eq(schema.episodes.id, ep.id))
+      await db.update(schema.episodes).set({ ...values, updatedAt: ts })
+        .where(and(eq(schema.episodes.id, ep.id), eq(schema.episodes.dramaId, dramaId)))
     } else {
       await db.insert(schema.episodes).values({
-        ...ep,
+        ...values,
         dramaId,
-        episodeNumber: ep.episode_number || ep.episodeNumber || 1,
-        title: ep.title || '未命名',
+        episodeNumber: values.episodeNumber || 1,
+        title: values.title || '未命名',
         createdAt: ts,
         updatedAt: ts,
       })

@@ -109,7 +109,7 @@ export async function generateCharacterImageFor(id: number, episodeId: number, o
   }
 
   const stylePrompt = await getDramaStylePrompt(char.dramaId)
-  const finalPrompt = await ensureCharacterFinalPrompt(char, ep.id, false, { model: opts.textModel, configId: opts.textConfigId })
+  const finalPrompt = await ensureCharacterFinalPrompt(char, ep.id, false, { model: opts.textModel, configId: opts.textConfigId, userId: await dramaOwnerId(char.dramaId) })
   const prompt = finalPrompt || characterImagePrompt(char, stylePrompt)
   return generateImage({ characterId: id, dramaId: char.dramaId, prompt, model: opts.model, size: CHARACTER_IMAGE_SIZE, configId: opts.configId ?? ep.imageConfigId ?? undefined, userId: await dramaOwnerId(char.dramaId) })
 }
@@ -129,7 +129,7 @@ export async function generateSceneImageFor(id: number, episodeId: number, opts:
   }
 
   const stylePrompt = await getDramaStylePrompt(scene.dramaId)
-  const finalPrompt = await ensureSceneFinalPrompt(scene, ep.id, false, { model: opts.textModel, configId: opts.textConfigId })
+  const finalPrompt = await ensureSceneFinalPrompt(scene, ep.id, false, { model: opts.textModel, configId: opts.textConfigId, userId: await dramaOwnerId(scene.dramaId) })
   const prompt = finalPrompt || [
     stylePrompt || '',
     scene.location,
@@ -157,7 +157,7 @@ export async function generatePropImageFor(id: number, episodeId: number, opts: 
   }
 
   const stylePrompt = await getDramaStylePrompt(prop.dramaId)
-  const finalPrompt = await ensurePropFinalPrompt(prop, ep.id, false, { model: opts.textModel, configId: opts.textConfigId })
+  const finalPrompt = await ensurePropFinalPrompt(prop, ep.id, false, { model: opts.textModel, configId: opts.textConfigId, userId: await dramaOwnerId(prop.dramaId) })
   const prompt = finalPrompt || propImagePrompt(prop, stylePrompt)
   return generateImage({ propId: id, dramaId: prop.dramaId, prompt, model: opts.model, size: PROP_IMAGE_SIZE, configId: opts.configId ?? ep.imageConfigId ?? undefined, userId: await dramaOwnerId(prop.dramaId) })
 }

@@ -18,14 +18,16 @@
 
 /**
  * Hono 服务入口
- * 组装顺序：CORS → 请求日志 → onError；/api/v1 子应用再叠 auth + audit。
+ * 组装顺序：CORS → 请求体上限 → 请求日志 → onError；/api/v1 子应用再叠 auth + audit。
  * 静态素材走自定义分类解析；前端产物按 SPA fallback 兜底；启动时拉起任务恢复与看门狗。
  */
 import 'dotenv/config'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { cors } from 'hono/cors'
+import { bodyLimit } from 'hono/body-limit'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -67,11 +69,40 @@ const projectRoot = path.resolve(__dirname, '../..')
 
 const app = new Hono()
 
+// 请求体上限：普通 JSON 接口 10MB，上传/长文本端点单独放宽
+// 上传类与 nginx client_max_body_size 100m 对齐（参考视频 50MB、批量导入最多 20 部小说）
+const BODY_LIMIT_DEFAULT = 10 * 1024 * 1024
+const BODY_LIMIT_TEXT = 32 * 1024 * 1024
+const BODY_LIMIT_UPLOAD = 100 * 1024 * 1024
+
+/** 文件上传入口：multipart 边界开销会让“恰好 10MB 的文件”超出 10MB 上限 */
+const UPLOAD_PATH = /^\/api\/v1\/(?:upload\/|novels\/upload$|production-batch\/upload$)/
+/** 小说正文回写（PUT /novels/:id）：正文允许至 10MB，JSON 转义后体积略胀，需留余量 */
+const TEXT_PATH = /^\/api\/v1\/novels(?:\/|$)/
+
+/** 超限回包沿用项目统一 JSON 形状，前端/日志采集都能直接识别 */
+const bodyTooLarge = (c: Context) =>
+  c.json({ code: 413, message: '请求体过大，已拒绝处理' }, 413)
+
+const defaultBodyLimit = bodyLimit({ maxSize: BODY_LIMIT_DEFAULT, onError: bodyTooLarge })
+const textBodyLimit = bodyLimit({ maxSize: BODY_LIMIT_TEXT, onError: bodyTooLarge })
+const uploadBodyLimit = bodyLimit({ maxSize: BODY_LIMIT_UPLOAD, onError: bodyTooLarge })
+
+/** 按路径选上限：上传 > 小说正文 > 全局默认 */
+function pickBodyLimit(path: string) {
+  if (UPLOAD_PATH.test(path)) return uploadBodyLimit
+  if (TEXT_PATH.test(path)) return textBodyLimit
+  return defaultBodyLimit
+}
+
 // 开发期 Nuxt dev server 与生产同域两个来源都放行，带 cookie
 app.use('*', cors({
   origin: ['http://localhost:3013', 'http://localhost:5679'],
   credentials: true,
 }))
+// 体积上限必须排在 requestLogger 之前：否则超限请求会先被日志中间件
+// clone() + text() 全量缓冲进内存（未鉴权即可发起的内存放大 DoS）
+app.use('*', (c, next) => pickBodyLimit(c.req.path)(c, next))
 app.use('*', requestLogger)
 // 错误兜底必须走 onError 钩子而不是中间件：api 子应用内抛出的异常
 // 不会向上传播到父应用中间件，父子两层各自挂 onError 才能都接住

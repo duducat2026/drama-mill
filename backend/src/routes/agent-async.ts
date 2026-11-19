@@ -24,7 +24,7 @@ import { eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, badRequest, now } from '../utils/response.js'
 import { executeAgentRun, normalizeToolResult } from '../services/agent-run.js'
-import { getDramaOwned, getEpisodeOwned } from '../services/ownership.js'
+import { getDramaOwned, getEpisodeOwned, assertEpisodeInDrama } from '../services/ownership.js'
 import { withTiming } from '../utils/stage-timing.js'
 import { recordTextUsageFromResult } from '../services/cost.js'
 import { resolveTextConfigMeta } from '../services/ai.js'
@@ -50,6 +50,8 @@ app.post('/storyboard_breaker/run', async (c) => {
   const episodeId = Number(body.episode_id)
   if (!episodeId || !body.drama_id) return badRequest(c, 'drama_id and episode_id are required')
   await getDramaOwned(Number(body.drama_id), user)
+  // 剧集必须归属当前用户且属于该项目（防「自己的项目 + 他人剧集」组合越权）
+  await assertEpisodeInDrama(episodeId, Number(body.drama_id), user)
   const existing = breakerRuns.get(episodeId)
   if (existing?.status === 'running') return success(c, { already_running: true })
 
@@ -115,6 +117,7 @@ app.post('/storyboard_breaker/retry', async (c) => {
   const episodeId = Number(body.episode_id)
   if (!episodeId || !body.drama_id) return badRequest(c, 'drama_id and episode_id are required')
   await getDramaOwned(Number(body.drama_id), user)
+  await assertEpisodeInDrama(episodeId, Number(body.drama_id), user)
   const existing = breakerRuns.get(episodeId)
   if (existing?.status === 'running') return success(c, { already_running: true })
   if (!existing || existing.status !== 'failed') return badRequest(c, '没有失败的拆分任务可重试')
@@ -177,6 +180,7 @@ app.post('/script_rewriter/run', async (c) => {
   const episodeId = Number(body.episode_id)
   if (!episodeId || !body.drama_id) return badRequest(c, 'drama_id and episode_id are required')
   await getDramaOwned(Number(body.drama_id), user)
+  await assertEpisodeInDrama(episodeId, Number(body.drama_id), user)
   const existing = rewriterRuns.get(episodeId)
   if (existing?.status === 'running') return success(c, { already_running: true })
 
@@ -239,6 +243,7 @@ app.post('/script_rewriter/retry', async (c) => {
   const episodeId = Number(body.episode_id)
   if (!episodeId || !body.drama_id) return badRequest(c, 'drama_id and episode_id are required')
   await getDramaOwned(Number(body.drama_id), user)
+  await assertEpisodeInDrama(episodeId, Number(body.drama_id), user)
   const existing = rewriterRuns.get(episodeId)
   if (existing?.status === 'running') return success(c, { already_running: true })
   if (!existing || existing.status !== 'failed') return badRequest(c, '没有失败的改写任务可重试')

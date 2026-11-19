@@ -1,17 +1,23 @@
 # Drama Mill 一体化编排：应用 + MySQL 8.4。
-# 默认端口：应用 5679、MySQL 宿主侧 3307。生产部署前务必改 JWT_SECRET 与数据库口令。
+# 默认端口：应用 5679、MySQL 宿主侧 3307（均只监听宿主机 127.0.0.1，不对公网暴露）。
+# 必填环境变量（compose 会校验，缺失直接报错，不提供内置默认值）：
+#   DATABASE_URL、MYSQL_ROOT_PASSWORD、MYSQL_USER、MYSQL_PASSWORD；另需自行设置 JWT_SECRET。
+#   容器内访问数据库时 DATABASE_URL 的主机名须用服务名 mysql，例如：
+#   DATABASE_URL=mysql://<MYSQL_USER>:<MYSQL_PASSWORD>@mysql:3306/drama_mill
+# 建议写在项目根目录 .env 中，或执行前 export 到当前 shell。
 services:
 
   drama-mill:
     build: .
     restart: unless-stopped
     ports:
-      - "5679:5679"
+      - "127.0.0.1:5679:5679"
     environment:
       NODE_ENV: production
       PORT: 5679
-      DATABASE_URL: mysql://dramamill:dramamill_tool@mysql:3306/drama_mill
-      JWT_SECRET: drama-mill-jwt-secret-change-me
+      DATABASE_URL: "${DATABASE_URL:?请配置 DATABASE_URL}"
+      # 必须外部注入（.env 或 shell 环境）：缺失时 compose 直接报错，避免公开默认密钥落入生产
+      JWT_SECRET: "${JWT_SECRET:?请在 .env 中配置 JWT_SECRET}"
       # 分类存储外挂到独立磁盘时启用，并与下方 volumes 对应：
       # ASSET_PATH: /media/images
       # VIDEO_PATH: /media/videos
@@ -38,12 +44,12 @@ services:
     image: mysql:8.4
     restart: unless-stopped
     ports:
-      - "3307:3306"
+      - "127.0.0.1:3307:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: drama-mill_root
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?请配置 MySQL root 密码}"
       MYSQL_DATABASE: drama_mill
-      MYSQL_USER: dramamill
-      MYSQL_PASSWORD: dramamill_tool
+      MYSQL_USER: "${MYSQL_USER:?请配置 MySQL 业务用户名}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?请配置 MySQL 业务密码}"
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -54,7 +60,8 @@ services:
       - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./docker/model-catalog-data.sql:/docker-entrypoint-initdb.d/02-model-catalog-data.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pdrama-mill_root"]
+      # 口令走 MYSQL_PWD 环境变量传入，避免出现在进程命令行里（ps 可见）；$$ 是 compose 的转义，容器内取 shell 变量
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost"]
       interval: 5s
       timeout: 3s
       retries: 20

@@ -159,8 +159,8 @@ function createMaxTokensFetch(providerName: string, inner?: typeof fetch, maxOut
 
 export async function getModel(fileModel: string | undefined, modelOverride?: string, textConfigId?: number, userId?: number | null) {
   // 请求可指定文本配置（含其 provider/baseUrl/apiKey），否则回退到当前用户启用配置；
-  // 重启恢复等无用户上下文链路（userId 缺省）退回全量选择（历史数据已回填归属）
-  const textConfig = (textConfigId ? await getConfigById(textConfigId) : null) || await getTextConfig(userId ?? undefined)
+  // 指定的配置必须归属当前用户（getConfigById 内部校验），重启恢复等无用户上下文链路（userId 缺省）不校验
+  const textConfig = (textConfigId ? await getConfigById(textConfigId, userId) : null) || await getTextConfig(userId ?? undefined)
   // 防御：模型名必须是非空字符串，否则回退配置默认模型（非法值会让 provider 报 modelId.includes 错误）
   const rawName = modelOverride || fileModel || textConfig.model
   const modelName = typeof rawName === 'string' && rawName.trim() ? rawName : textConfig.model

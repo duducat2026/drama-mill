@@ -9,6 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import sharp from 'sharp'
 import { extToMimeType, getAbsolutePath, thumbPathFor } from './storage-core.js'
+import { assertSafeOutboundUrl, fetchWithSafeRedirects } from './url-validator.js'
 
 /**
  * 为已落盘图片生成列表页缩略图（宽 400 WebP，与原图同目录）。
@@ -82,7 +83,9 @@ export async function fetchRemoteImageAsCompressedDataUrl(
   const quality = options.quality ?? 68
 
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) })
+    // 参考图地址来自用户请求，先过出网校验（私网/环回/元数据地址一律不拉）
+    await assertSafeOutboundUrl(url)
+    const resp = await fetchWithSafeRedirects(url, { signal: AbortSignal.timeout(30_000) })
     if (!resp.ok) return null
     const buffer = Buffer.from(await resp.arrayBuffer())
     const resized = sharp(buffer).rotate().resize({

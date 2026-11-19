@@ -127,6 +127,14 @@ export function providerHint(serviceType?: string | null, provider?: string | nu
     return ' 服务商为 openai 时，网关必须实现对应的 OpenAI 官方端点。'
   }
   if (p === 'dashscope' && serviceType === 'text') return ' 百炼文本走 OpenAI 兼容模式，Base URL 需以 /compatible-mode/v1 结尾。'
+  if (p === 'token-plan') {
+    // 套餐 Key（sk-sp-）与按量付费的 Key / Base URL 完全隔离，混用是这里最常见的坑
+    // 套餐只开放文本与视频：图片服务走按量付费 dashscope，不会进到本分支
+    const endpoint = serviceType === 'text'
+      ? '文本走 OpenAI 兼容端点 {Base URL}/chat/completions（Base URL 以 /compatible-mode/v1 结尾）'
+      : '视频走 {站点根}/api/v1/services/aigc/video-generation/video-synthesis + 请求头 X-DashScope-Async，轮询 {站点根}/api/v1/tasks/{task_id}'
+    return ` 百炼 Token Plan：套餐 Key 以 sk-sp- 开头，只能配套餐站点（https://token-plan.cn-beijing.maas.aliyuncs.com），与按量付费的 sk- Key / dashscope.aliyuncs.com 完全隔离，混用回 401/403 或走按量计费；${endpoint}；模型未在套餐内会回 404 Model not exist。`
+  }
   if (p === 'model-router') {
     // 该网关按能力分协议，且模型标识必须带 symbol/ 前缀，这两点最容易踩
     const endpoint = serviceType === 'text'

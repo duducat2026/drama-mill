@@ -7,11 +7,14 @@
  */
 import type { Pool } from 'mysql2/promise'
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 
-/** 种子账号（幂等）：用户名不存在才创建，已存在不覆盖密码 */
+/** 种子账号（幂等）：用户名不存在才创建，已存在不覆盖密码。
+ *  初始口令每次进程启动随机生成（32 位十六进制），仅在实际建号时打印到控制台一次，
+ *  不再落仓库/文档，避免公开默认口令被直接登录 */
 export const SEED_USERS = [
-  { username: 'drama-mill', password: 'drama-mill', role: 'admin', nickname: '平台管理员' },
-  { username: 'test', password: 'drama-mill', role: 'user', nickname: '测试用户' },
+  { username: 'drama-mill', password: crypto.randomBytes(16).toString('hex'), role: 'admin', nickname: '平台管理员' },
+  { username: 'test', password: crypto.randomBytes(16).toString('hex'), role: 'user', nickname: '测试用户' },
 ]
 
 /** 历史管理员账号名兼容：旧种子用的 adimin 重命名为 admin（保留原用户与其密码） */
@@ -44,6 +47,7 @@ async function hasAnyAdmin(pool: Pool) {
 }
 
 async function seedUsers(pool: Pool) {
+  const created: { username: string; password: string; role: string }[] = []
   for (const u of SEED_USERS) {
     const [rows] = await pool.query('SELECT id FROM users WHERE username = ?', [u.username])
     if ((rows as unknown[]).length > 0) continue
@@ -54,7 +58,14 @@ async function seedUsers(pool: Pool) {
       'INSERT INTO users (username, password_hash, role, status, nickname, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [u.username, hash, u.role, 'active', u.nickname, ts, ts],
     )
-    console.log(`👤 已创建种子账号 ${u.username} (${u.role})`)
+    created.push({ username: u.username, password: u.password, role: u.role })
+  }
+  // 口令只在本次建号时打印一次；已存在的账号不重新生成也不回显，避免每次重启往日志里写凭证
+  if (created.length > 0) {
+    console.log('\n' + '='.repeat(72))
+    console.log('🔐 已创建种子账号（初始口令仅本次显示，请立即保存，登录后请尽快修改）')
+    for (const u of created) console.log(`   ${u.role.padEnd(5)} 用户名: ${u.username}   初始口令: ${u.password}`)
+    console.log('='.repeat(72) + '\n')
   }
 }
 

@@ -129,10 +129,11 @@ test('backend user cloud-queue uses own config and scopes to owner', () => {
   // 用本人视频配置（模型 + API-KEY）查询，与提交任务所用 Key 一致；返回掩码后的本人配置
   assert.match(tasks, /resolveCloudQueryTarget\(undefined, c\.req\.query\('model'\), user\.id\)/)
   assert.match(tasks, /maskApiKey\(cfg\.apiKey\)/)
-  // 本人归属：自有项目 / 无项目历史任务（未落 user_id）/ 本人提交；
-  // 无项目但落了他人 user_id 的任务不再放行（下推 SQL，见 ownerCond）
+  // 本人归属：自有项目 / 无项目但由本人提交（落了 user_id）；
+  // F-20：双 NULL 历史行与「无项目但落了他人 user_id」一律不可见（下推 SQL，见 ownerCond）
   assert.match(tasks, /ownedDramaIds\(user\)/)
-  assert.match(tasks, /\$\{schema\.sysTask\.userId\} IS NULL OR \$\{schema\.sysTask\.userId\} = \$\{user\.id\}/)
+  assert.match(tasks, /and\(isNull\(schema\.sysTask\.dramaId\), eq\(schema\.sysTask\.userId, user\.id\)\)/)
+  assert.doesNotMatch(tasks, /userId\} IS NULL OR/)
   assert.match(tasks, /\.limit\(500\)/)
   // 用户侧仍不返回云端陌生任务明细，只回总量
   assert.doesNotMatch(tasks, /cloud_only: cmp\.cloudOnly/)

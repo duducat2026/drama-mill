@@ -129,8 +129,13 @@ test('tasks 路由：无项目但落了 user_id 的任务只归本人', () => {
   assert.match(route, /else if \(row\.userId != null && row\.userId !== user\.id\) throw new OwnershipError\(404, '任务不存在'\)/)
   // 列表与云排队对比条件同样收紧（不再放行全部 dramaId IS NULL 行）
   const listBlock = route.slice(route.indexOf("} else {", route.indexOf('// GET /tasks')), route.indexOf('if (type) conds.push'))
-  assert.match(listBlock, /\$\{schema\.sysTask\.userId\} IS NULL OR \$\{schema\.sysTask\.userId\} = \$\{user\.id\}/)
+  // F-20：已删除「userId IS NULL OR」双 NULL 放行分支，无项目任务只归本人
+  assert.match(listBlock, /const ownCond = and\(\n\s*isNull\(schema\.sysTask\.dramaId\),\n\s*eq\(schema\.sysTask\.userId, user\.id\),\n\s*\)/)
   assert.doesNotMatch(listBlock, /or\(isNull\(schema\.sysTask\.dramaId\), inArray/)
-  const cloudBlock = route.slice(route.indexOf('const ownerCond'), route.indexOf('const localRows'))
-  assert.match(cloudBlock, /\$\{schema\.sysTask\.userId\} IS NULL OR \$\{schema\.sysTask\.userId\} = \$\{user\.id\}/)
+  assert.doesNotMatch(listBlock, /userId\} IS NULL OR/)
+  // 云排队对比同样按「无项目只归本人」判定（双 NULL 历史行不可见）
+  const cloudBlock = route.slice(route.indexOf('// 本人归属'), route.indexOf('const localRows'))
+  assert.ok(cloudBlock.length > 0, '云排队归属片段未找到')
+  assert.match(cloudBlock, /and\(isNull\(schema\.sysTask\.dramaId\), eq\(schema\.sysTask\.userId, user\.id\)\)/)
+  assert.doesNotMatch(cloudBlock, /userId\} IS NULL OR/)
 })

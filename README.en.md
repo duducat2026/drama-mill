@@ -152,7 +152,7 @@ All have defaults — zero-config works for local development. Copy `backend/.en
 |---|---|---|
 | `DATABASE_URL` | — | Full MySQL connection string (takes precedence over individual options) |
 | `MYSQL_HOST` / `MYSQL_PORT` | `127.0.0.1` / `3306` | Individual options when `DATABASE_URL` is unset; inside containers, falls back to `host.docker.internal` |
-| `MYSQL_USER` / `MYSQL_PASSWORD` | `dramamill` / `dramamill_tool` | Fallback values when unset |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | — | **No built-in defaults**: required when `DATABASE_URL` is unset, otherwise the app exits with `[FATAL]` |
 | `MYSQL_DATABASE` | `drama_mill` | Database name |
 | `MYSQL_CONNECTION_LIMIT` / `MYSQL_QUEUE_LIMIT` | `30` / `200` | Pool size and queue cap |
 | `PORT` | `5679` | Backend port |
@@ -210,7 +210,7 @@ Visit: <http://localhost:5679>
 Tables are created automatically on first launch (idempotent — initialization and incremental migrations are replayed on every start):
 
 ```bash
-DATABASE_URL=mysql://dramamill:dramamill_tool@127.0.0.1:3306/drama_mill npm start
+DATABASE_URL=mysql://dramamill:CHANGE_ME@127.0.0.1:3306/drama_mill npm start   # replace CHANGE_ME with your own password
 ```
 
 - **30 tables** in total, covering dramas / episodes / storyboards / assets / tasks / AI configs / styles / usage / audit / model catalog, etc.
@@ -220,14 +220,14 @@ DATABASE_URL=mysql://dramamill:dramamill_tool@127.0.0.1:3306/drama_mill npm star
 
 ### 🔑 First Use
 
-1. Log in. The first launch idempotently seeds two default accounts (for security the login page **only hints at the regular user account**; the admin account is documented in the table below — both share the same default password):
+1. Log in. The first launch idempotently seeds two default accounts. **Initial passwords are randomly generated at first creation and printed only once to the service startup console** (neither the login page nor the docs record them):
 
    | Role | Username | Default password | Purpose |
    |---|---|---|---|
-   | Regular user | `test` | `drama-mill` | Everyday creation: projects / novels / storyboards / generation, sees only own data |
-   | Admin | `drama-mill` | `drama-mill` | Admin console: accounts, audit, cost, storage quota, gateway, monitoring, etc. |
+   | Regular user | `test` | See console output on first startup | Everyday creation: projects / novels / storyboards / generation, sees only own data |
+   | Admin | `drama-mill` | See console output on first startup | Admin console: accounts, audit, cost, storage quota, gateway, monitoring, etc. |
 
-   > ⚠️ **Right after logging in, change the default passwords via "top-right account area → Change password"**. The admin account is deliberately excluded from the public login-page hints and recorded only in this README to shrink the brute-force surface on public deployments; if any admin already exists in the database, seeding automatically skips creating a new one (existing accounts are kept).
+   > ⚠️ **The initial password is shown only once — save it immediately, then change it after logging in via "top-right account area → Change password"** (changing it immediately invalidates that user's existing signed-in tokens). If any admin already exists in the database, seeding automatically skips creating a new one (existing accounts are kept and no password is printed).
 2. Open **Settings → AI Service Configuration** and add services under the Text / Image / Video columns:
    - Pick an official vendor template to auto-fill the Base URL and recommended models, then enter your own API key
    - Validate with "Test config / Generation test" — failures come with localized reasons
@@ -323,7 +323,7 @@ server {
 
 ### 🐳 Docker (alternative)
 
-The repo keeps `Dockerfile` + `docker-compose.yml` (app + MySQL 8.4 + health checks). On the MySQL volume's first initialization, compose automatically runs `docker/init.sql` (schema + seeds) and `docker/model-catalog-data.sql` (model catalog snapshot), so the database ships fully pre-loaded. The multi-stage image is still based on `node:20-slim`, while the runtime requires Node 22+ — upgrade the image base layer before deploying with Docker, or prefer the PM2 one-click path above.
+The repo keeps `Dockerfile` + `docker-compose.yml` (app + MySQL 8.4 + health checks). On the MySQL volume's first initialization, compose automatically runs `docker/init.sql` (schema + seeds) and `docker/model-catalog-data.sql` (model catalog snapshot), so the database ships fully pre-loaded. The multi-stage image is based on `node:22-slim` and runs as the non-root `node` user; compose ships no default credentials, so set `DATABASE_URL`, `MYSQL_ROOT_PASSWORD`, `MYSQL_USER` and `MYSQL_PASSWORD` in the project-root `.env` before starting (compose fails fast when any is missing). App and MySQL ports bind to `127.0.0.1` only — put your own reverse proxy in front for public access.
 
 ### 🧮 Handy Checks
 

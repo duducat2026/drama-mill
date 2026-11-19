@@ -65,9 +65,10 @@ interface GenerateVideoParams {
 }
 
 export async function generateImage(params: GenerateImageParams): Promise<number> {
-  // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到该用户当前启用配置，避免生成被旧引用卡死
+  // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到该用户当前启用配置，避免生成被旧引用卡死；
+  // 配置归属不匹配（他人 config_id）同样按失效处理
   const config = params.configId
-    ? (await getConfigById(params.configId)) ?? await getActiveConfig('image', params.userId)
+    ? (await getConfigById(params.configId, params.userId)) ?? await getActiveConfig('image', params.userId)
     : await getActiveConfig('image', params.userId)
   if (!config) throw new Error('未配置图片模型，请先到「设置」页添加并启用 AI 服务')
 
@@ -104,9 +105,9 @@ export async function generateImage(params: GenerateImageParams): Promise<number
 }
 
 export async function generateVideo(params: GenerateVideoParams): Promise<number> {
-  // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到该用户当前启用配置
+  // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到该用户当前启用配置；配置归属不匹配同样按失效处理
   const config = params.configId
-    ? (await getConfigById(params.configId)) ?? await getActiveConfig('video', params.userId)
+    ? (await getConfigById(params.configId, params.userId)) ?? await getActiveConfig('video', params.userId)
     : await getActiveConfig('video', params.userId)
   if (!config) throw new Error('未配置视频模型，请先到「设置」页添加并启用 AI 服务')
 

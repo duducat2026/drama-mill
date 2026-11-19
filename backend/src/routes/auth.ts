@@ -20,19 +20,27 @@
  * 认证路由 — 登录 / 当前用户 / 修改密码 / 登出
  */
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, badRequest } from '../utils/response.js'
 import { getUserByUsername, getUserById, hashPassword, signToken, toPublicUser, verifyPassword } from '../services/auth.js'
 import { getUserQuotaStatus } from '../services/storage-quota.js'
 import { isAiCallEnabled, setAiCallEnabled } from '../services/ai-switch.js'
 import { getWatchdogSwitches, isWatchdogKind, setWatchdogSwitch, type WatchdogKind } from '../services/watchdog-switch.js'
+import { checkLoginLimit, recordLoginFailure, resetLoginAttempts } from '../utils/login-limiter.js'
 import { now } from '../utils/response.js'
 
 const app = new Hono()
 
 /** 用户侧自助改密的新密码最小长度（管理员建号/重置仍沿用 4 位下限） */
 const MIN_PASSWORD_LEN = 6
+
+/** 递增 token 版本：使该用户已签发的全部 token 立即失效（改密/登出/重置口令后调用） */
+async function bumpTokenVersion(userId: number) {
+  await db.update(schema.users)
+    .set({ tokenVersion: sql`token_version + 1`, updatedAt: now() })
+    .where(eq(schema.users.id, userId))
+}
 
 // POST /auth/login — 账号密码登录，签发 JWT
 app.post('/login', async (c) => {
@@ -41,19 +49,31 @@ app.post('/login', async (c) => {
   const password = String(body.password || '')
   if (!username || !password) return badRequest(c, '用户名和密码不能为空')
 
+  // 来源 IP：nginx 在本机回源，真实客户端 IP 在 X-Forwarded-For 首段；直连场景退回 X-Real-IP
+  const clientIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    || c.req.header('x-real-ip')?.trim()
+    || 'unknown'
+  // 锁定检查放在查库之前：锁定期间的请求不产生数据库与 bcrypt 开销
+  const limitMsg = checkLoginLimit(username, clientIp)
+  if (limitMsg) return c.json({ code: 429, message: limitMsg }, 429)
+
   const user = await getUserByUsername(username)
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    recordLoginFailure(username, clientIp)
     return c.json({ code: 401, message: '用户名或密码错误' }, 401)
   }
   if (user.status !== 'active') {
     return c.json({ code: 403, message: '账号已被禁用，请联系管理员' }, 403)
   }
 
+  // 本次密码校验通过：清零该账号+IP 的历史失败计数
+  resetLoginAttempts(username, clientIp)
+
   await db.update(schema.users)
     .set({ lastLoginAt: now(), updatedAt: now() })
     .where(eq(schema.users.id, user.id))
 
-  const token = signToken({ id: user.id, username: user.username, role: user.role as 'user' | 'admin', nickname: user.nickname, aiCallEnabled: user.aiCallEnabled !== false })
+  const token = signToken({ id: user.id, username: user.username, role: user.role as 'user' | 'admin', nickname: user.nickname, aiCallEnabled: user.aiCallEnabled !== false, tokenVersion: user.tokenVersion || 0 })
   return success(c, { token, user: toPublicUser(user) })
 })
 
@@ -64,7 +84,7 @@ app.get('/me', async (c) => {
 })
 
 // POST /auth/change-password — 用户侧修改本人密码：校验原密码后落 bcrypt 新哈希
-// 已签发的 JWT 仍在新有效期内（无状态令牌无黑名单），如需立即失效需重新登录
+// 改密成功后递增 token 版本，已签发的旧 JWT 立即失效（防止口令泄露后旧会话继续可用）
 app.post('/change-password', async (c) => {
   const me = c.get('user')
   const body = await c.req.json().catch(() => ({}))
@@ -84,6 +104,9 @@ app.post('/change-password', async (c) => {
   await db.update(schema.users)
     .set({ passwordHash: hashPassword(newPassword), updatedAt: now() })
     .where(eq(schema.users.id, me.id))
+
+  // 新口令生效的同时让旧 token（含当前这枚）作废：客户端需用新口令重新登录
+  await bumpTokenVersion(me.id)
 
   return success(c, { changed: true, user_id: me.id })
 })
@@ -125,7 +148,11 @@ app.get('/storage-quota', async (c) => {
   return success(c, await getUserQuotaStatus(user.id))
 })
 
-// POST /auth/logout — 无状态 JWT：前端清除 token 即可，这里仅返回成功
-app.post('/logout', (c) => success(c))
+// POST /auth/logout — 无状态 JWT：递增 token 版本使当前用户的旧 token 立即失效，客户端同时清除本地 token
+app.post('/logout', async (c) => {
+  const user = c.get('user')
+  await bumpTokenVersion(user.id)
+  return success(c)
+})
 
 export default app

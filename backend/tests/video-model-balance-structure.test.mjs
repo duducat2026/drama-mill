@@ -41,9 +41,10 @@ test('cloud-tasks：模型在途量查询（PENDING + RUNNING 合计），失败
 
 test('generation：提交前按上游负载选模型，切换即回写任务落库模型', () => {
   const gen = readGenerationSources(root)
-  // 选模：仅百炼系（含 Model Router 网关，后者只做素材过滤不探负载）+ 候选 ≥2 才分流；负载相同取配置顺序靠前（稳定不震荡）
+  // 选模：仅百炼系（Model Router 网关 / Token Plan 套餐只做素材过滤不探负载）+ 候选 ≥2 才分流；负载相同取配置顺序靠前（稳定不震荡）
   assert.match(gen, /async function pickLeastLoadedVideoModel/)
-  assert.match(gen, /config\.provider !== 'dashscope' && config\.provider !== 'model-router'\) return fallback/)
+  assert.match(gen, /const MEDIA_FILTER_ONLY_PROVIDERS = \['model-router', 'token-plan'\]/)
+  assert.match(gen, /config\.provider !== 'dashscope' && !mediaFilterOnly\) return fallback/)
   assert.match(gen, /candidates\.length < 2\) return fallback/)
   assert.match(gen, /count < bestLoad/)
   // 单候选探测失败（如不支持列表查询/429）仅跳过该候选；成功探测不足 2 个才整体回退，

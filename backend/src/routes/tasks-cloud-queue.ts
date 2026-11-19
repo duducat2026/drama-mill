@@ -32,13 +32,11 @@ export async function handleCloudQueue(c: Context) {
   // 多池聚合：配置内多个视频模型各有限流池，聚合全部池才是真实在途全貌；显式传 model 时只查单池
   const cloud = await fetchCloudVideoTasksMulti(cfg.apiKey, models)
 
-  // 本人归属：无项目关联的任务只放行「未落 user_id 的历史任务」与本人任务，其余限定自有项目；限量防全表加载
+  // 本人归属：无项目关联的任务只归本人，其余限定自有项目；
+  // 项目与 user_id 双 NULL 的历史行无法判定归属，按不可见处理（不再整体放行）；限量防全表加载
   const owned = await ownedDramaIds(user)
   const ownerCond = or(
-    and(
-      isNull(schema.sysTask.dramaId),
-      sql`(${schema.sysTask.userId} IS NULL OR ${schema.sysTask.userId} = ${user.id})`,
-    ),
+    and(isNull(schema.sysTask.dramaId), eq(schema.sysTask.userId, user.id)),
     ...(owned.size ? [inArray(schema.sysTask.dramaId, [...owned])] : []),
   )
   const localRows = await db.select({

@@ -24,7 +24,9 @@ module.exports = {
       merge_logs: true,
       time: true,
       // 单机单实例即可（应用内有内存任务状态）
-      instances: 1
+      instances: 1,
+      // 内存兜底：RSS 超 1G 自动重启，避免单进程堆膨胀后被系统 OOM 直接杀掉（拿不到退出钩子）
+      max_memory_restart: '1G'
     }
   ]
 }

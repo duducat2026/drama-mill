@@ -6,8 +6,10 @@
  * Drama Mill — AI 配置探测辅助：连接测试请求构建 + 字段解析工具
  */
 import { joinProviderUrl } from '../services/adapters/url.js'
+import { tokenPlanRoot } from '../services/adapters/token-plan.js'
 import { isOfficialProvider, parseConfigTemperature } from '../services/ai.js'
 import { toSnakeCase } from '../utils/transform.js'
+import { assertSafeOutboundUrl } from '../utils/url-validator.js'
 
 export function normalizeTemperature(v: any): number | null {
   if (v === null || v === undefined || v === '') return null
@@ -50,6 +52,32 @@ export function geminiHeaders(apiKey?: string, withJson = false) {
   }
   if (withJson) headers['Content-Type'] = 'application/json'
   return headers
+}
+
+/**
+ * base_url 出网校验（SSRF 兜底）：空值视为「走厂商默认域名」跳过；
+ * 非法协议或解析到内网/环回/链路本地/元数据地址返回错误文案，由调用侧回 400。
+ */
+export async function unsafeBaseUrl(raw: unknown): Promise<string | null> {
+  const url = typeof raw === 'string' ? raw.trim() : ''
+  if (!url) return null
+  try {
+    await assertSafeOutboundUrl(url)
+    return null
+  } catch (error: any) {
+    return error?.message || 'base_url 不合法'
+  }
+}
+
+// 空体探测里属于「参数没带」的报错：鉴权与路径都已通过，判连通而不算失败
+export const PARAM_REJECTED = /BadRequest\.Empty(Model|Parameter|Input)|Required parameter|missing from request|invalid model format|invalid_request_error/i
+export const REACHABLE_STATUS = [200, 204, 400, 401, 403]
+
+/** 探测结果文案：未按预期响应 / 空体触发参数校验属正常 / 已响应按状态码判断 */
+export function probeMessage(reachable: boolean, ok: boolean, httpOk: boolean) {
+  if (!reachable) return '端点未按预期响应，请检查 Base URL 和代理前缀'
+  if (ok) return httpOk ? '端点可访问，认证与路径基本正常' : '端点可访问，认证已通过（空体探测触发参数校验，属预期）'
+  return '端点已响应，请根据状态码判断认证或路径是否正确'
 }
 
 export function buildProbe(serviceType: string, provider: string, baseUrl: string, model?: string, apiKey?: string) {
@@ -115,12 +143,16 @@ export function buildProbe(serviceType: string, provider: string, baseUrl: strin
     }
   }
 
-  if (p === 'dashscope') {
-    // 百炼文本走 OpenAI 兼容模式（base_url 以 compatible-mode/v1 结尾），GET /models 探测连通性
+  // 套餐不开放图片服务，image 侧只有按量付费 dashscope 会进本分支
+  if (p === 'dashscope' || (p === 'token-plan' && serviceType !== 'image')) {
+    // 百炼系（按量付费 / Token Plan 套餐）同协议族：文本走 OpenAI 兼容模式，GET /models 探测连通性
+    // Token Plan 的套餐 Key 只在套餐站点生效：文本挂在 /compatible-mode/v1，视频挂在站点根的 /api/v1 下
+    const textBase = p === 'token-plan' ? joinProviderUrl(baseUrl, '/compatible-mode/v1', '') : baseUrl
+    const apiBase = p === 'token-plan' ? tokenPlanRoot(baseUrl) : baseUrl
     if (serviceType === 'text') {
       return {
         method: 'GET',
-        url: joinProviderUrl(baseUrl, '', '/models'),
+        url: joinProviderUrl(textBase, '', '/models'),
         headers: bearerHeaders(apiKey),
         body: undefined,
       }
@@ -129,7 +161,7 @@ export function buildProbe(serviceType: string, provider: string, baseUrl: strin
     if (serviceType === 'video') {
       return {
         method: 'POST',
-        url: joinProviderUrl(baseUrl, '/api/v1', '/services/aigc/video-generation/video-synthesis'),
+        url: joinProviderUrl(apiBase, '/api/v1', '/services/aigc/video-generation/video-synthesis'),
         headers: {
           ...bearerHeaders(apiKey, true),
           'X-DashScope-Async': 'enable',
@@ -139,7 +171,7 @@ export function buildProbe(serviceType: string, provider: string, baseUrl: strin
     }
     return {
       method: 'POST',
-      url: joinProviderUrl(baseUrl, '/api/v1', '/services/aigc/multimodal-generation/generation'),
+      url: joinProviderUrl(apiBase, '/api/v1', '/services/aigc/multimodal-generation/generation'),
       headers: bearerHeaders(apiKey, true),
       body: {},
     }

@@ -26,10 +26,11 @@ import { VolcEngineImageAdapter } from './volcengine-image'
 import { VolcEngineVideoAdapter } from './volcengine-video'
 import { MiniMaxVideoAdapter } from './minimax-video'
 import { DashScopeImageAdapter, DashScopeVideoAdapter } from './dashscope'
+import { TokenPlanVideoAdapter } from './token-plan'
 import { ModelRouterImageAdapter, ModelRouterVideoAdapter } from './model-router'
 import type { ImageProviderAdapter, VideoProviderAdapter } from './types'
 
-/** 生图侧注册表（openai/gemini/volcengine/dashscope + 自建网关） */
+/** 生图侧注册表（openai/gemini/volcengine/dashscope + 自建网关）；百炼 Token Plan 套餐不提供图片服务 */
 export const imageAdapters: Record<string, ImageProviderAdapter> = {
   'model-router': new ModelRouterImageAdapter(),
   dashscope: new DashScopeImageAdapter(),
@@ -41,6 +42,7 @@ export const imageAdapters: Record<string, ImageProviderAdapter> = {
 /** 生视频侧注册表（无 openai/gemini 系厂商） */
 export const videoAdapters: Record<string, VideoProviderAdapter> = {
   'model-router': new ModelRouterVideoAdapter(),
+  'token-plan': new TokenPlanVideoAdapter(),
   dashscope: new DashScopeVideoAdapter(),
   minimax: new MiniMaxVideoAdapter(),
   volcengine: new VolcEngineVideoAdapter(),

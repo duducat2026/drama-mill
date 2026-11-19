@@ -69,10 +69,12 @@ export function parseConfigQpm(settingsRaw: string | null | undefined): number |
 
 export const officialProviders: Record<ServiceType, readonly string[]> = {
   // 文本侧百炼走 OpenAI 兼容模式（base_url 以 compatible-mode/v1 收尾），运行时复用 createOpenAI
-  text: ['openai', 'gemini', 'volcengine', 'dashscope', 'model-router'],
+  // token-plan：百炼套餐订阅（Key 以 sk-sp- 开头），与按量付费同协议族、仅站点不同；
+  // 套餐只开放文本与视频——图片端点仅支持同步（异步 text2image 实测 403），生图仍走按量付费 dashscope
+  text: ['openai', 'gemini', 'volcengine', 'dashscope', 'token-plan', 'model-router'],
   image: ['openai', 'gemini', 'volcengine', 'dashscope', 'model-router'],
   // Model Router 网关：文本按 OpenAI Chat 兼容、图片/视频按 DashScope 兼容体（端点同在 /v1 下）
-  video: ['volcengine', 'minimax', 'dashscope', 'model-router'],
+  video: ['volcengine', 'minimax', 'dashscope', 'token-plan', 'model-router'],
 }
 
 export function isOfficialProvider(serviceType?: string | null, provider?: string | null): boolean {
@@ -91,6 +93,11 @@ export function getTextProviderBaseUrl(config: AIConfig) {
   // Model Router 文本同样按 OpenAI Chat 兼容协议处理，端点挂在 /v1
   if (provider === 'model-router') {
     return joinProviderUrl(config.baseUrl, '/v1', '')
+  }
+
+  // Token Plan 套餐文本按 OpenAI Chat 兼容协议，端点挂在 /compatible-mode/v1（填站点根也自动补全）
+  if (provider === 'token-plan') {
+    return joinProviderUrl(config.baseUrl, '/compatible-mode/v1', '')
   }
 
   if (provider === 'gemini') {
@@ -117,7 +124,10 @@ export async function resolveTextConfigMeta(userId?: number | null, configId?: n
   let row = null
   if (configId) {
     const [hit] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, configId))
-    row = hit ?? null
+    // 指定配置必须归属调用者：他人的配置号不参与计价，按「未指定」处理
+    // （userId 缺省的内部/历史链路不校验，避免丢记账）
+    if (hit && (userId == null || hit.userId === userId)) row = hit
+    else if (hit) logTaskWarn('AIConfig', 'config-ownership-denied', { configId, callerUserId: userId, ownerUserId: hit.userId })
   }
   if (!row) row = await selectActiveConfig('text', userId)
   if (!row) return null
@@ -125,14 +135,16 @@ export async function resolveTextConfigMeta(userId?: number | null, configId?: n
   return { configId: row.id, provider: row.provider || '', model: models[0] || '' }
 }
 
-/** 按用户维度取启用配置：指定 userId 时只在该用户的配置中选；未指定（历史任务/管理链路）退回全量 */
-async function selectActiveConfig(serviceType: ServiceType, userId?: number | null) {
+/** 按用户维度取启用配置：指定 userId 时只在该用户的配置中选；
+ *  未指定 userId 时默认不匹配任何配置（用户侧绝不回退到他人配置），
+ *  只有「在途任务恢复」这类显式 allowAllUsers 的内部链路才退回全量选择 */
+async function selectActiveConfig(serviceType: ServiceType, userId?: number | null, allowAllUsers = false) {
   const rows = await db.select().from(schema.aiServiceConfigs)
     .where(eq(schema.aiServiceConfigs.serviceType, serviceType))
   const usable = rows.filter(r =>
     r.isActive
     && isOfficialProvider(serviceType, r.provider)
-    && (userId == null || r.userId === userId))
+    && (userId != null ? r.userId === userId : allowAllUsers))
   if (!usable.length) return null
   // priority 数值大的排前面
   usable.sort((a, b) => (b.priority || 0) - (a.priority || 0))
@@ -142,6 +154,11 @@ async function selectActiveConfig(serviceType: ServiceType, userId?: number | nu
 export async function getActiveConfig(serviceType: ServiceType, userId?: number | null): Promise<AIConfig | null> {
   // 模型调用总开关（用户侧）：关闭时直接拒绝，不解析任何配置（文本/图片/视频共用本入口）
   await assertAiCallEnabled(userId)
+  // 用户侧必须有归属人：无 userId 时一律不解析配置，绝不回退到他人配置
+  if (userId == null) {
+    logTaskWarn('AIConfig', 'active-config-no-user', { serviceType })
+    return null
+  }
   return loadActiveConfig(serviceType, userId)
 }
 
@@ -149,13 +166,18 @@ export async function getActiveConfig(serviceType: ServiceType, userId?: number 
  * 在途任务恢复专用配置解析：不过模型调用开关。
  * 开关只拦「新发起」的调用；已提交上游、正在轮询/续跑的任务要继续取回结果，
  * 拦住它们会把已计费的在途任务白白判失败。
+ * 历史任务可能没有 user_id，只有本链路允许退回全量选择；其它入口一律要求归属人。
  */
 export async function getResumeConfig(serviceType: ServiceType, userId?: number | null): Promise<AIConfig | null> {
   return loadActiveConfig(serviceType, userId)
 }
 
+/**
+ * 内部解析：userId 有值时只命中本人配置；无 userId 时按「在途恢复」语义全量兜底。
+ * 用户侧入口 getActiveConfig 已在 userId 缺失时直接返回 null，不会走到兜底分支。
+ */
 async function loadActiveConfig(serviceType: ServiceType, userId?: number | null): Promise<AIConfig | null> {
-  const active = await selectActiveConfig(serviceType, userId)
+  const active = await selectActiveConfig(serviceType, userId, true)
   if (!active) {
     logTaskWarn('AIConfig', 'active-config-missing', { serviceType, userId })
     return null
@@ -204,7 +226,15 @@ function toAIConfig(row: typeof schema.aiServiceConfigs.$inferSelect): AIConfig 
   }
 }
 
-export async function getConfigById(id: number): Promise<AIConfig | null> {
+/** 锁定配置归属校验：userId 缺省（内部链路）跳过；配置不存在或归属他人返回 false */
+export async function isConfigOwnedBy(configId: number, userId?: number | null): Promise<boolean> {
+  if (userId == null) return true
+  const [row] = await db.select({ userId: schema.aiServiceConfigs.userId })
+    .from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, configId))
+  return !!row && row.userId === userId
+}
+
+export async function getConfigById(id: number, callerUserId?: number | null): Promise<AIConfig | null> {
   const [row] = await db.select().from(schema.aiServiceConfigs)
     .where(eq(schema.aiServiceConfigs.id, id))
   if (!row || !row.isActive) {
@@ -213,6 +243,11 @@ export async function getConfigById(id: number): Promise<AIConfig | null> {
   }
   // 集锁定的配置同样过用户总开关：按配置归属人判定，关闭时拒绝发起调用
   await assertAiCallEnabled(row.userId)
+  // 调用者只能使用自己的配置（callerUserId 缺省的内部/恢复链路不校验）
+  if (callerUserId != null && row.userId !== callerUserId) {
+    logTaskWarn('AIConfig', 'config-ownership-denied', { configId: id, callerUserId, ownerUserId: row.userId })
+    return null
+  }
   if (!isOfficialProvider(row.serviceType as ServiceType, row.provider)) {
     logTaskWarn('AIConfig', 'config-by-id-unsupported-provider', {
       configId: id,

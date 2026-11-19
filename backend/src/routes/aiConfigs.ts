@@ -19,6 +19,7 @@
 /**
  * AI 服务配置管理：CRUD + 连通性探测(/test) + 极简生成测试(/:id/generate-test)
  * 配置按 user_id 行级隔离，越权一律按不存在处理（notFound，不泄露存在性）
+ * base_url 入库与探测前统一走 assertSafeOutboundUrl（utils/url-validator.ts）的 SSRF 出网校验
  * generate-test 失败也回 200 + ok:false 的结构化诊断，黑盒 err.message 查不出根因
  */
 import { Hono } from 'hono'
@@ -31,7 +32,10 @@ import { runTextGenerationTest, submitMediaGenerationTest } from '../services/ai
 import { describeFailure } from '../services/failure-detail.js'
 import { maskApiKey } from '../services/cloud-tasks.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, redactUrl } from '../utils/task-logger.js'
-import { normalizeTemperature, parseModelList, withParsedFields, bearerHeaders, geminiHeaders, buildProbe } from './ai-config-probe.js'
+import {
+  normalizeTemperature, parseModelList, withParsedFields, bearerHeaders, geminiHeaders, buildProbe,
+  unsafeBaseUrl, probeMessage, REACHABLE_STATUS, PARAM_REJECTED,
+} from './ai-config-probe.js'
 
 const app = new Hono()
 
@@ -65,6 +69,9 @@ app.post('/', async (c) => {
   if (!isOfficialProvider(body.service_type, body.provider)) {
     return badRequest(c, 'Unsupported service_type/provider')
   }
+  const baseUrl = body.base_url || ''
+  const baseUrlError = await unsafeBaseUrl(baseUrl)
+  if (baseUrlError) return badRequest(c, baseUrlError)
 
   let temperature: number | null = null
   if ('temperature' in body) {
@@ -84,7 +91,7 @@ app.post('/', async (c) => {
     priority: body.priority || 0,
     model: JSON.stringify(body.model || []),
     apiKey: body.api_key || '',
-    baseUrl: body.base_url || '',
+    baseUrl,
     name: body.name || `${body.provider}-${body.service_type}`,
     provider: body.provider,
     serviceType: body.service_type,
@@ -96,16 +103,6 @@ app.post('/', async (c) => {
   return created(c, withParsedFields(row))
 })
 
-// 空体探测里属于"参数没带"的报错：鉴权与路径都已通过，判连通而不算失败
-const PARAM_REJECTED = /BadRequest\.Empty(Model|Parameter|Input)|Required parameter|missing from request|invalid model format|invalid_request_error/i
-const REACHABLE_STATUS = [200, 204, 400, 401, 403]
-
-function probeMessage(reachable: boolean, ok: boolean, httpOk: boolean) {
-  if (!reachable) return '端点未按预期响应，请检查 Base URL 和代理前缀'
-  if (ok) return httpOk ? '端点可访问，认证与路径基本正常' : '端点可访问，认证已通过（空体探测触发参数校验，属预期）'
-  return '端点已响应，请根据状态码判断认证或路径是否正确'
-}
-
 // POST /ai-configs/test — 连通性探测：不发真实生成参数，只看端点/鉴权
 app.post('/test', async (c) => {
   const body = await c.req.json()
@@ -115,6 +112,10 @@ app.post('/test', async (c) => {
   if (!isOfficialProvider(body.service_type, body.provider)) {
     return badRequest(c, 'Unsupported service_type/provider')
   }
+
+  // 探测等于让服务端按用户给的地址发请求，先过统一出网校验（协议 + 私网/环回/元数据地址）
+  const baseUrlError = await unsafeBaseUrl(body.base_url)
+  if (baseUrlError) return badRequest(c, baseUrlError)
 
   const model = Array.isArray(body.model) ? body.model[0] : body.model
   const probe = buildProbe(body.service_type, body.provider, body.base_url, model, body.api_key)
@@ -142,7 +143,6 @@ app.post('/test', async (c) => {
       method: probe.method,
       url: probeUrl,
       message: probeMessage(reachable, ok, resp.ok),
-      response_preview: text.slice(0, 240),
     }
     if (reachable) {
       logTaskSuccess('AIConfig', 'probe-done', { url: probeUrl, status: resp.status, provider: body.provider })
@@ -158,7 +158,6 @@ app.post('/test', async (c) => {
       method: probe.method,
       url: probeUrl,
       message: error.message || '请求失败',
-      response_preview: '',
     })
   }
 })
@@ -239,6 +238,11 @@ app.put('/:id', async (c) => {
   const provider = 'provider' in body ? body.provider : existing.provider
   if (!isOfficialProvider(serviceType, provider)) {
     return badRequest(c, 'Unsupported service_type/provider')
+  }
+
+  if ('base_url' in body) {
+    const baseUrlError = await unsafeBaseUrl(body.base_url)
+    if (baseUrlError) return badRequest(c, baseUrlError)
   }
 
   const updates: Record<string, any> = { updatedAt: now() }

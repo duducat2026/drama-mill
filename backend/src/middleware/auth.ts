@@ -48,6 +48,11 @@ export async function authMiddleware(c: Context, next: Next) {
     return c.json({ code: 401, message: '账号已被禁用，请联系管理员' }, 401)
   }
 
+  // token 版本比对：改密/登出/管理员重置口令后版本递增，旧 token 立即失效（无需黑名单）
+  if ((row.tokenVersion || 0) !== (payload.tokenVersion || 0)) {
+    return c.json({ code: 401, message: '登录已失效，请重新登录' }, 401)
+  }
+
   c.set('user', {
     id: row.id,
     username: row.username,
@@ -55,6 +60,7 @@ export async function authMiddleware(c: Context, next: Next) {
     nickname: row.nickname,
     // 模型调用总开关随请求注入：鉴权已查过用户行，下游判定零额外查询
     aiCallEnabled: row.aiCallEnabled !== false,
+    tokenVersion: row.tokenVersion || 0,
   })
   return next()
 }

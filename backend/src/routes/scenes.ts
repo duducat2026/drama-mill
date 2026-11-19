@@ -21,12 +21,12 @@
  * 删除一律走 deletedAt 打标，历史生成记录要留给成本追溯
  */
 import { Hono } from 'hono'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, badRequest, now } from '../utils/response.js'
 import { generateSceneImageFor, batchGenerateSceneImages } from '../services/asset-images.js'
 import { ensureSceneFinalPrompt } from '../services/final-prompt.js'
-import { getDramaOwned, getSceneOwned } from '../services/ownership.js'
+import { getDramaOwned, getSceneOwned, assertEpisodeInDrama } from '../services/ownership.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
@@ -38,6 +38,8 @@ app.post('/', async (c) => {
   if (!body.drama_id) return badRequest(c, 'drama_id required')
   if (!body.location?.trim()) return badRequest(c, 'location required')
   await getDramaOwned(Number(body.drama_id), user)
+  // 带 episode_id 时必须属于该项目：否则会把场景挂到他人剧集上
+  if (body.episode_id) await assertEpisodeInDrama(Number(body.episode_id), Number(body.drama_id), user)
   const ts = now()
   const res = await db.insert(schema.scenes).values({
     lighting: body.lighting || '',
@@ -96,7 +98,9 @@ app.post('/:id/generate-image', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
   if (!body.episode_id) return badRequest(c, 'episode_id is required')
-  await getSceneOwned(id, user)
+  const sceneOwned = await getSceneOwned(id, user)
+  // 集必须属于场景所在项目：否则会拿他人的集锁定配置与归属建任务
+  await assertEpisodeInDrama(Number(body.episode_id), sceneOwned.dramaId, user)
   try {
     logTaskStart('SceneImage', 'generate', { sceneId: id, episodeId: Number(body.episode_id) })
     const genId = await generateSceneImageFor(id, Number(body.episode_id), {
@@ -119,12 +123,16 @@ app.post('/:id/generate-image', async (c) => {
 app.post('/batch-generate-images', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()
-  const ids: number[] = body.scene_ids || []
+  const ids: number[] = (body.scene_ids || []).map(Number).filter(Number.isFinite)
   if (!body.episode_id) return badRequest(c, 'episode_id is required')
   if (!ids.length) return badRequest(c, 'scene_ids is required')
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, Number(body.episode_id)))
   if (!ep) return badRequest(c, 'Episode not found')
   await getDramaOwned(ep.dramaId, user)
+  // 勾选集合必须全部属于本集所在项目：只校验集归属堵不住跨项目资产 ID
+  const rows = await db.select({ id: schema.scenes.id, dramaId: schema.scenes.dramaId })
+    .from(schema.scenes).where(inArray(schema.scenes.id, ids))
+  if (rows.some(r => r.dramaId !== ep.dramaId)) return badRequest(c, '包含不属于当前项目的场景')
   const results = await batchGenerateSceneImages(Number(body.episode_id), ids, {
     model: body.model,
     configId: body.config_id ?? undefined,
@@ -142,11 +150,11 @@ app.post('/:id/generate-prompt', async (c) => {
   const scene = await getSceneOwned(id, user)
   if (!body.episode_id) return badRequest(c, 'episode_id is required')
 
-  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, Number(body.episode_id)))
-  if (!ep) return badRequest(c, 'Episode not found')
+  // 集归属 + 与场景同项目双重校验（直接查库无法判定越权）
+  const ep = await assertEpisodeInDrama(Number(body.episode_id), scene.dramaId, user)
 
   logTaskStart('FinalPrompt', 'scene-generate', { sceneId: id, episodeId: ep.id, force: !!body.force })
-  const finalPrompt = await ensureSceneFinalPrompt(scene, ep.id, !!body.force, { model: body.text_model, configId: body.text_config_id ?? undefined })
+  const finalPrompt = await ensureSceneFinalPrompt(scene, ep.id, !!body.force, { model: body.text_model, configId: body.text_config_id ?? undefined, userId: user.id })
   if (!finalPrompt) {
     logTaskError('FinalPrompt', 'scene-generate', { sceneId: id, error: 'agent returned empty prompt' })
     return badRequest(c, '最终提示词生成失败，请重试')

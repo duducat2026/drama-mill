@@ -22,7 +22,7 @@ import { hashPassword } from '../../services/auth.js'
 import { getUserUsageBytes, quotaOf } from '../../services/storage-quota.js'
 import { badRequest, notFound, now, success } from '../../utils/response.js'
 import { toSnakeCase } from '../../utils/transform.js'
-import { and, count, desc, eq, like, or } from 'drizzle-orm'
+import { and, count, desc, eq, like, or, sql } from 'drizzle-orm'
 import { pageOf } from './shared.js'
 
 const app = new Hono()
@@ -114,6 +114,8 @@ app.put('/users/:id', async (c) => {
   if (body.password) {
     if (String(body.password).length < 4) return badRequest(c, '密码至少 4 位')
     fields.passwordHash = hashPassword(String(body.password))
+    // 管理员重置口令后递增 token 版本：该用户已登录的旧会话立即失效
+    fields.tokenVersion = sql`token_version + 1`
   }
 
   await db.update(schema.users).set(fields).where(eq(schema.users.id, id))

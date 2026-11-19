@@ -11,6 +11,13 @@ import { aiConfigAPI } from '~/composables/useApi'
 // 实测两个最常踩的坑：把文档里的完整端点当 Base URL、模型标识漏 symbol/ 前缀。
 export const MODEL_ROUTER_HINT = 'Base URL 只填站点根，不要把文档里的完整端点粘进来（程序会按类型补 /v1/chat/completions、/v1/images/generations、/v1/videos/generations）；模型标识必须带 symbol/ 前缀（如 qwen/wan3.0-video），且该 Key 需已在控制台「授权管理」勾选过对应模型，否则回 403。'
 
+// 百炼 Token Plan 是坐席订阅套餐（Key 以 sk-sp- 开头），与按量付费的 Key / Base URL 完全隔离；
+// 协议族与按量付费一致，只是文本挂 /compatible-mode/v1、视频挂站点根的 /api/v1。
+// 套餐只开放文本与视频：图片端点仅支持同步（异步 text2image 实测 403），不适合批量生产链路。
+export const TOKEN_PLAN_HINT = 'Token Plan 套餐 Key 以 sk-sp- 开头，只能配套餐站点（https://token-plan.cn-beijing.maas.aliyuncs.com），与按量付费的 sk- Key / dashscope.aliyuncs.com 混用会 401/403 或误走按量计费；文本 Base URL 以 /compatible-mode/v1 结尾，视频填站点根即可（程序会补 /api/v1 端点）。套餐不提供图片服务，生图请用按量付费百炼。'
+// 套餐模型清单比按量付费窄：未收录的模型一律回 404 Model not exist。
+export const TOKEN_PLAN_MODEL_HINT = ' 套餐未收录的模型会回 404 Model not exist（wan2.7-t2v / wan2.7-i2v 不在套餐内，文生/图生视频请用 happyhorse-1.1-t2v / happyhorse-1.1-i2v）。'
+
 export const providerPresets = {
   text: {
     gemini: { label: 'Gemini 官方', baseUrl: 'https://generativelanguage.googleapis.com', models: ['gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3-flash-preview'] },
@@ -20,6 +27,12 @@ export const providerPresets = {
       baseUrl: 'https://ws-chxo3s48ugcpj1h0.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
       models: ['qwen3.8-flash', 'qwen3.8-max', 'deepseek-v4-pro', 'deepseek-v4-flash'],
       hint: 'Base URL 中的 workspace ID（ws-…）与区域（cn-beijing）为示例，保存前请替换为您百炼控制台的实际值。',
+    },
+    'token-plan': {
+      label: '百炼 Token Plan',
+      baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+      models: ['qwen3.8-flash', 'qwen3.8-max', 'deepseek-v4-pro', 'kimi-k2.6', 'glm-5.3'],
+      hint: TOKEN_PLAN_HINT,
     },
     'model-router': {
       label: 'Model Router 网关',
@@ -43,6 +56,12 @@ export const providerPresets = {
     volcengine: { label: 'Seedance 2.0 官方', baseUrl: 'https://ark.cn-beijing.volces.com', models: ['doubao-seedance-2-0-fast-260128', 'doubao-seedance-2-0-260128', 'doubao-seedance-2-0-mini-260615'] },
     minimax: { label: 'MiniMax H3 官方', baseUrl: 'https://api.minimaxi.com', models: ['MiniMax-H3'] },
     dashscope: { label: '百炼 DashScope', baseUrl: 'https://dashscope.aliyuncs.com/api/v1', models: ['wan3.0-video', 'wan3.0-video-prime', 'wan2.7-t2v', 'wan2.7-i2v'] },
+    'token-plan': {
+      label: '百炼 Token Plan',
+      baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com',
+      models: ['wan3.0-video', 'happyhorse-1.1-t2v', 'happyhorse-1.1-i2v', 'happyhorse-1.1-r2v'],
+      hint: `${TOKEN_PLAN_HINT}${TOKEN_PLAN_MODEL_HINT} t2v/i2v/r2v 三种模式的素材要求互斥，提交前会按任务素材形态自动换成兼容模型。`,
+    },
     'model-router': {
       label: 'Model Router 网关',
       baseUrl: 'https://model-router.edu-aliyun.com',
@@ -60,8 +79,14 @@ export function useAiConfigs() {
   const cfgListLoading = ref(true)
   const cfgListError = ref('')
 
-  const providers = ['gemini', 'openai', 'volcengine', 'minimax', 'dashscope', 'model-router']
-  const providerSelectOptions = computed(() => providers.map(p => ({ label: p, value: p })))
+  const providers = ['gemini', 'openai', 'volcengine', 'minimax', 'dashscope', 'token-plan', 'model-router']
+  // 各服务类型可选服务商：镜像后端 officialProviders 白名单，避免下拉给出后端会 400 拒绝的组合
+  // （图片侧没有 minimax 与 token-plan：MiniMax 只提供视频，百炼套餐不提供图片服务）
+  const providersByType = {
+    text: ['gemini', 'openai', 'volcengine', 'dashscope', 'token-plan', 'model-router'],
+    image: ['gemini', 'openai', 'volcengine', 'dashscope', 'model-router'],
+    video: ['volcengine', 'minimax', 'dashscope', 'token-plan', 'model-router'],
+  }
   const serviceTypes = [{ type: 'text', label: '文本' }, { type: 'image', label: '图片' }, { type: 'video', label: '视频' }]
   const serviceIcons = { text: FileText, image: Image, video: Video }
   const serviceMeta = {
@@ -73,6 +98,8 @@ export function useAiConfigs() {
   const serviceTab = computed(() => validServiceType(route.query.service) ? route.query.service : 'text')
   const activeServiceTypes = computed(() => serviceTypes.filter(st => st.type === serviceTab.value))
   const cfgServiceType = computed(() => validServiceType(route.params.serviceType) ? route.params.serviceType : 'text')
+  // 服务商下拉按当前服务类型过滤，与模板 pill（presetsByType）口径保持一致
+  const providerSelectOptions = computed(() => (providersByType[cfgServiceType.value] || providers).map(p => ({ label: p, value: p })))
 
   function selectServiceTab(type) {
     return router.replace({ path: '/settings', query: { ...route.query, service: type } })
@@ -156,7 +183,7 @@ export function useAiConfigs() {
     route, router, Cpu, Palette, Star,
     cfgs, cfgListLoading, cfgListError,
     providers, providerSelectOptions, serviceTypes, serviceIcons, serviceMeta,
-    providerPresets, MODEL_ROUTER_HINT, validServiceType,
+    providerPresets, MODEL_ROUTER_HINT, TOKEN_PLAN_HINT, TOKEN_PLAN_MODEL_HINT, validServiceType,
     serviceTab, activeServiceTypes, cfgServiceType,
     selectServiceTab, onServiceTabKeydown, backToConfigs,
     byType, countActive, maskKey, copyText,

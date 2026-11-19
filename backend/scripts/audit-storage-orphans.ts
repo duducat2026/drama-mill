@@ -52,7 +52,7 @@ function connectionOptions() {
     host: host.replace(/^\[|\]$/g, ''),
     port: Number(parsed?.port || env.MYSQL_PORT || 3306),
     user: parsed ? decodeURIComponent(parsed.username) : env.MYSQL_USER || 'dramamill',
-    password: parsed ? decodeURIComponent(parsed.password) : env.MYSQL_PASSWORD || 'dramamill_tool',
+    password: parsed ? decodeURIComponent(parsed.password) : env.MYSQL_PASSWORD || '',
     database: parsed ? decodeURIComponent(parsed.pathname.slice(1)) : env.MYSQL_DATABASE || 'drama_mill',
     connectTimeout: 5000,
     charset: 'utf8mb4',

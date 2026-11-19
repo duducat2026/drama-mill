@@ -27,7 +27,7 @@ import { db, schema } from '../db/index.js'
 import { success, created, badRequest } from '../utils/response.js'
 import { generateImage, generateVideo, retryTask, getTaskQueueStats } from '../services/generation.js'
 import { localFileSize } from '../utils/storage.js'
-import { getDramaOwned, getStoryboardOwned, ownedDramaIds } from '../services/ownership.js'
+import { getDramaOwned, getStoryboardOwned, getCharacterOwned, getSceneOwned, getPropOwned, ownedDramaIds } from '../services/ownership.js'
 import { describeFailure } from '../services/failure-detail.js'
 import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import {
@@ -73,9 +73,14 @@ app.post('/', async (c) => {
   const type = body.type as TaskType
   if (type !== 'image' && type !== 'video') return badRequest(c, 'type 必须为 image 或 video')
 
-  // 归属校验：优先按项目，其次按分镜反查项目
-  if (body.drama_id) await getDramaOwned(Number(body.drama_id), user)
-  else if (body.storyboard_id) await getStoryboardOwned(Number(body.storyboard_id), user)
+  // 归属校验：项目必填；分镜/角色/场景/道具各自再校验一次归属，
+  // 只校验项目堵不住「用自己的 drama_id 配他人资产 ID」的组合越权
+  if (!body.drama_id) return badRequest(c, 'drama_id is required')
+  await getDramaOwned(Number(body.drama_id), user)
+  if (body.storyboard_id) await getStoryboardOwned(Number(body.storyboard_id), user)
+  if (body.character_id) await getCharacterOwned(Number(body.character_id), user)
+  if (body.scene_id) await getSceneOwned(Number(body.scene_id), user)
+  if (body.prop_id) await getPropOwned(Number(body.prop_id), user)
 
   if (type === 'image') {
     if (!body.prompt) return badRequest(c, 'prompt is required')
@@ -202,15 +207,15 @@ app.get('/', async (c) => {
     }
     conds.push(eq(schema.sysTask.dramaId, Number(dramaId)))
   } else {
-    // 任务归属：无项目关联的任务只放行「未落 user_id 的历史任务」与本人任务（设置页生成测试等落了 user_id），
-    // 其余限定自有项目（替代全表拉取后内存过滤）
-    const legacyCond = and(
+    // 任务归属：无项目关联的任务只归本人（设置页生成测试等落了 user_id），
+    // 项目与 user_id 双 NULL 的历史行归属不可判定，按不可见处理（不再整体放行）
+    const ownCond = and(
       isNull(schema.sysTask.dramaId),
-      sql`(${schema.sysTask.userId} IS NULL OR ${schema.sysTask.userId} = ${user.id})`,
+      eq(schema.sysTask.userId, user.id),
     )
     conds.push(owned.size
-      ? or(inArray(schema.sysTask.dramaId, [...owned]), legacyCond)
-      : legacyCond)
+      ? or(inArray(schema.sysTask.dramaId, [...owned]), ownCond)
+      : ownCond)
   }
   if (type) conds.push(eq(schema.sysTask.type, type))
   if (storyboardId) conds.push(eq(schema.sysTask.storyboardId, Number(storyboardId)))

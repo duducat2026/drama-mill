@@ -103,7 +103,7 @@ graph TB
 - **数据库**：MySQL 8.4（docker-compose 镜像 `mysql:8.4`；脚本部署要求 MySQL 8.0+），utf8mb4。
 - **进程管理**：PM2 fork 单实例（`ecosystem.config.cjs`，应用内有内存任务状态，禁止 cluster）。
 - **反代**：nginx 1.24 写法（TLSv1.2/1.3，Let's Encrypt，SSE 关缓冲，300s 超时，100MB 上传上限）。
-- **容器**：三阶段 Dockerfile（node:20-slim；前端 generate → 后端原生依赖编译 → tsx 运行时），国内镜像源构建参数。
+- **容器**：三阶段 Dockerfile（node:22-slim；前端 generate → 后端原生依赖编译 → tsx 运行时，以非 root 的 `node` 用户执行），国内镜像源构建参数；compose 不提供默认数据库口令，必填项缺失即报错。
 - **无 Redis/消息队列/对象存储**：队列与缓存均为进程内存实现（`ttl-cache.ts`、`generation-queue.ts`、`admin/count-cache.ts`），素材存本地磁盘。
 
 ---

@@ -55,13 +55,6 @@
           {{ loading ? '登录中…' : '登 录' }}
         </button>
       </form>
-
-      <!-- 首次部署默认账号提示（仅普通用户；管理员账号见 README，不在公开登录页暴露） -->
-      <div class="login-hint">
-        <div class="login-hint-title">首次部署默认账号</div>
-        <div class="login-hint-row"><span>普通用户</span><code>test</code><span>/</span><code>drama-mill</code></div>
-        <div class="login-hint-note">请在「右上角账号区 → 修改密码」中及时更换默认口令。</div>
-      </div>
     </div>
   </div>
 </template>
@@ -155,23 +148,4 @@ async function submit() {
   border-radius: var(--radius);
 }
 .login-btn { margin-top: 20px; min-height: 40px; width: 100%; }
-/* 默认账号提示 */
-.login-hint {
-  margin-top: 20px; padding: 10px 12px;
-  font-size: 12px; color: var(--text-3);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.login-hint-title { font-weight: 600; color: var(--text-1); margin-bottom: 4px; }
-.login-hint-row { display: flex; align-items: center; gap: 6px; line-height: 2; }
-.login-hint-row code {
-  padding: 1px 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-1);
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-.login-hint-note { margin-top: 4px; color: var(--text-3); }
 </style>

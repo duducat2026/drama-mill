@@ -33,6 +33,30 @@ function uploadNested(c: any): string {
   return String((c.get('user') as { id?: number } | undefined)?.id ?? 0)
 }
 
+// 图片上传：扩展名白名单 + 文件头校验 + 20MB 上限，落盘名只由已校验的扩展名决定
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
+const IMAGE_MAX = 20 * 1024 * 1024 // 20MB
+
+// 常见图片格式文件头（按扩展名分组匹配；不匹配即拒绝，挡 .html/.svg 改后缀）
+const IMAGE_MAGIC: Array<{ ext: Set<string>; bytes: number[] }> = [
+  { ext: new Set(['.png']), bytes: [0x89, 0x50, 0x4e, 0x47] },
+  { ext: new Set(['.jpg', '.jpeg']), bytes: [0xff, 0xd8, 0xff] },
+  { ext: new Set(['.gif']), bytes: [0x47, 0x49, 0x46] },
+  { ext: new Set(['.webp']), bytes: [0x52, 0x49, 0x46, 0x46] }, // RIFF 容器头
+]
+
+function isValidImageMagic(buffer: ArrayBuffer, ext: string): boolean {
+  const magic = IMAGE_MAGIC.find(m => m.ext.has(ext))
+  if (!magic) return false
+  const view = new Uint8Array(buffer)
+  if (!magic.bytes.every((b, i) => view[i] === b)) return false
+  // WebP 是 RIFF 容器：第 8-11 字节还需是 WEBP（否则可能是 wav/avi 等同类容器）
+  if (ext === '.webp') {
+    return String.fromCharCode(...view.slice(8, 12)) === 'WEBP'
+  }
+  return true
+}
+
 // POST /upload/image — 参考图/头像等图片上传，附带列表页缩略图
 app.post('/image', async (c) => {
   const body = await c.req.parseBody()
@@ -42,8 +66,21 @@ app.post('/image', async (c) => {
     return badRequest(c, 'file is required')
   }
 
+  const ext = extOf(file.name)
+  if (!IMAGE_EXT.has(ext)) {
+    return badRequest(c, '仅支持 png/jpg/jpeg/webp/gif 格式')
+  }
+
   const buffer = await file.arrayBuffer()
-  const path = await saveUploadedFile(buffer, 'uploads', file.name, uploadNested(c))
+  if (buffer.byteLength > IMAGE_MAX) {
+    return badRequest(c, '图片大小不能超过 20MB')
+  }
+  if (!isValidImageMagic(buffer, ext)) {
+    return badRequest(c, '文件内容与扩展名不匹配')
+  }
+
+  // 丢弃客户端文件名，落盘名只由已校验的扩展名决定
+  const path = await saveUploadedFile(buffer, 'uploads', `upload${ext}`, uploadNested(c))
   // 上传图与生图共用一套展示链路：同步出缩略图，生成失败不影响上传本身
   await generateImageThumb(path)
   return success(c, { url: `/${path}`, path })

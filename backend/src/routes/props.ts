@@ -21,13 +21,13 @@
  * 与场景同构；道具图强调白底单品，供分镜合成引用
  */
 import { Hono } from 'hono'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, badRequest, now } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { generatePropImageFor, batchGeneratePropImages } from '../services/asset-images.js'
 import { ensurePropFinalPrompt } from '../services/final-prompt.js'
-import { getDramaOwned, getPropOwned } from '../services/ownership.js'
+import { getDramaOwned, getPropOwned, assertEpisodeInDrama } from '../services/ownership.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
@@ -49,6 +49,8 @@ app.post('/', async (c) => {
   if (!body.drama_id) return badRequest(c, 'drama_id required')
   if (!body.name?.trim()) return badRequest(c, 'name required')
   await getDramaOwned(Number(body.drama_id), user)
+  // 带 episode_id 时必须属于该项目：否则会把道具挂到他人剧集上
+  if (body.episode_id) await assertEpisodeInDrama(Number(body.episode_id), Number(body.drama_id), user)
   const ts = now()
   const res = await db.insert(schema.props).values({
     description: body.description || '',
@@ -109,11 +111,11 @@ app.post('/:id/generate-prompt', async (c) => {
   const prop = await getPropOwned(id, user)
   if (!body.episode_id) return badRequest(c, 'episode_id is required')
 
-  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, Number(body.episode_id)))
-  if (!ep) return badRequest(c, 'Episode not found')
+  // 集归属 + 与道具同项目双重校验（直接查库无法判定越权）
+  const ep = await assertEpisodeInDrama(Number(body.episode_id), prop.dramaId, user)
 
   logTaskStart('FinalPrompt', 'prop-generate', { force: !!body.force, episodeId: ep.id, propId: id })
-  const finalPrompt = await ensurePropFinalPrompt(prop, ep.id, !!body.force, { model: body.text_model, configId: body.text_config_id ?? undefined })
+  const finalPrompt = await ensurePropFinalPrompt(prop, ep.id, !!body.force, { model: body.text_model, configId: body.text_config_id ?? undefined, userId: user.id })
   if (!finalPrompt) {
     logTaskError('FinalPrompt', 'prop-generate', { propId: id, error: 'agent returned empty prompt' })
     return badRequest(c, '最终提示词生成失败，请重试')
@@ -128,7 +130,9 @@ app.post('/:id/generate-image', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
   if (!body.episode_id) return badRequest(c, 'episode_id is required')
-  await getPropOwned(id, user)
+  const propOwned = await getPropOwned(id, user)
+  // 集必须属于道具所在项目：否则会拿他人的集锁定配置与归属建任务
+  await assertEpisodeInDrama(Number(body.episode_id), propOwned.dramaId, user)
   try {
     logTaskStart('PropImage', 'generate', { episodeId: Number(body.episode_id), propId: id })
     const genId = await generatePropImageFor(id, Number(body.episode_id), {
@@ -149,12 +153,16 @@ app.post('/:id/generate-image', async (c) => {
 app.post('/batch-generate-images', async (c) => {
   const user = c.get('user')
   const body = await c.req.json()
-  const ids: number[] = body.prop_ids || []
+  const ids: number[] = (body.prop_ids || []).map(Number).filter(Number.isFinite)
   if (!body.episode_id) return badRequest(c, 'episode_id is required')
   if (!ids.length) return badRequest(c, 'prop_ids is required')
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, Number(body.episode_id)))
   if (!ep) return badRequest(c, 'Episode not found')
   await getDramaOwned(ep.dramaId, user)
+  // 勾选集合必须全部属于本集所在项目：只校验集归属堵不住跨项目资产 ID
+  const rows = await db.select({ id: schema.props.id, dramaId: schema.props.dramaId })
+    .from(schema.props).where(inArray(schema.props.id, ids))
+  if (rows.some(r => r.dramaId !== ep.dramaId)) return badRequest(c, '包含不属于当前项目的道具')
   const results = await batchGeneratePropImages(Number(body.episode_id), ids, {
     model: body.model,
     configId: body.config_id ?? undefined,

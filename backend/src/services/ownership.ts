@@ -52,6 +52,16 @@ export async function getEpisodeOwned(episodeId: number, user: AuthUser) {
 
 const { content: _c, scriptContent: _s, ...episodeLightCols } = getTableColumns(schema.episodes)
 
+/**
+ * 剧集「归属 + 项目一致性」双校验：剧集必须属于当前用户，且属于指定项目。
+ * 只校验剧集归属堵不住「用自己项目 ID 配他人剧集 ID」的组合越权，Agent/资产链路统一走这里。
+ */
+export async function assertEpisodeInDrama(episodeId: number, dramaId: number, user: AuthUser) {
+  const { ep } = await getEpisodeOwned(episodeId, user)
+  if (ep.dramaId !== dramaId) throw new OwnershipError(400, 'episode 不属于该项目')
+  return ep
+}
+
 /** 全列版本：仅供需要正文（content/script_content）的单集详情使用 */
 export async function getEpisodeFullOwned(episodeId: number, user: AuthUser) {
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
@@ -90,7 +100,8 @@ export async function getPropOwned(propId: number, user: AuthUser) {
   return row
 }
 
-/** 小说归属：优先按 novels.user_id（多租户回填后均有）；早期无 user_id 的行回退按所属项目归属 */
+/** 小说归属：优先按 novels.user_id（多租户回填后均有）；早期无 user_id 的行回退按所属项目归属；
+ *  user_id 与 drama_id 双空的行无法判定归属，一律按不存在处理（不再静默放行） */
 export async function getNovelOwned(novelId: number, user: AuthUser) {
   const [row] = await db.select().from(schema.novels).where(eq(schema.novels.id, novelId))
   if (!row || row.deletedAt) throw new OwnershipError(404, '小说不存在')
@@ -98,8 +109,12 @@ export async function getNovelOwned(novelId: number, user: AuthUser) {
     if (row.userId !== user.id) throw new OwnershipError(404, '小说不存在')
     return row
   }
-  if (row.dramaId) await getDramaOwned(row.dramaId, user)
-  return row
+  if (row.dramaId) {
+    await getDramaOwned(row.dramaId, user)
+    return row
+  }
+  // 双 NULL 历史行：既无 user_id 也无 drama_id，无法判定归属 → 拒绝
+  throw new OwnershipError(404, '小说不存在')
 }
 
 /** 当前用户拥有的项目 id 集合（供列表过滤） */

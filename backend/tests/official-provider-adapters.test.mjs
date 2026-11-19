@@ -56,10 +56,13 @@ test('backend rejects unsupported providers at DB and route boundaries', () => {
   assert.match(ai, /officialProviders/)
   // 文本新增百炼官方入口（OpenAI 兼容模式），图片/视频既有百炼入口不变
   // Model Router 网关：文本走 OpenAI Chat 兼容、图片/视频走 DashScope 兼容体，三类均已开白名单
-  assert.match(ai, /text:\s*\[\s*'openai',\s*'gemini',\s*'volcengine',\s*'dashscope',\s*'model-router'\s*\]/)
+  // Token Plan 套餐（sk-sp- Key）与按量付费同协议族、仅站点不同，但只开放文本与视频
+  assert.match(ai, /text:\s*\[\s*'openai',\s*'gemini',\s*'volcengine',\s*'dashscope',\s*'token-plan',\s*'model-router'\s*\]/)
   // 后续迭代：图片新增百炼，视频新增 MiniMax / 百炼官方入口
   assert.match(ai, /image:\s*\[\s*'openai',\s*'gemini',\s*'volcengine',\s*'dashscope',\s*'model-router'\s*\]/)
-  assert.match(ai, /video:\s*\[\s*'volcengine',\s*'minimax',\s*'dashscope',\s*'model-router'\s*\]/)
+  assert.match(ai, /video:\s*\[\s*'volcengine',\s*'minimax',\s*'dashscope',\s*'token-plan',\s*'model-router'\s*\]/)
+  // 套餐图片端点只支持同步（异步 text2image 实测 403），不纳入图片服务：图片白名单必须不含 token-plan
+  assert.doesNotMatch(ai, /image:\s*\[[^\]]*'token-plan'/)
   assert.doesNotMatch(ai, /'deepseek'/)
   assert.doesNotMatch(ai, /'ali'/)
   assert.doesNotMatch(ai, /'vidu'/)
@@ -120,8 +123,8 @@ test('AI config probe uses provider-specific auth schemes', () => {
   assert.match(route, /p === 'openai'/)
   assert.match(route, /p === 'volcengine'/)
   assert.match(route, /'\/chat\/completions'/)
-  // 百炼文本探针走 OpenAI 兼容模式 GET /models（base_url 已含 compatible-mode/v1）
-  assert.match(route, /joinProviderUrl\(baseUrl, '', '\/models'\)/)
+  // 百炼系文本探针走 OpenAI 兼容模式 GET /models（按量付费 base_url 已含 compatible-mode/v1，套餐由 textBase 归一补全）
+  assert.match(route, /joinProviderUrl\(textBase, '', '\/models'\)/)
   assert.doesNotMatch(route, /viduHeaders/)
   assert.doesNotMatch(route, /p === 'deepseek'/)
   assert.doesNotMatch(route, /p === 'ali'/)

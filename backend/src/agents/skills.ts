@@ -78,7 +78,10 @@ export const skillWorkspaces: Record<string, Workspace> = Object.fromEntries(
   Object.entries(AGENT_SKILL_MAP).map(([agentType, prefixes]) => [agentType, new Workspace({
     id: `workspace-${agentType}`,
     name: `${agentType} workspace`,
-    filesystem: new LocalFilesystem({ basePath: WORKSPACE_DIR }),
+    // Agent 侧只读：模型能读技能文件，但写/删/改目录一律抛 WorkspaceReadOnlyError。
+    // 技能与提示词的人工维护走下面的 skillsManagerWorkspace（仅管理端接口可用），
+    // 不让模型通过工具链改写自身指令，避开提示词注入→权限持久的升级路径。
+    filesystem: new LocalFilesystem({ basePath: WORKSPACE_DIR, readOnly: true }),
     skills: () => scanSkillPaths().filter(p => underPrefix(p.replace(/^skills\//, ''), prefixes)),
   })]),
 )
@@ -87,6 +90,7 @@ export const skillWorkspaces: Record<string, Workspace> = Object.fromEntries(
 export const skillsManagerWorkspace = new Workspace({
   id: 'workspace-skills-manager',
   name: 'skills manager',
+  // 管理端必须可写：技能/提示词的增删改都走这个实例（仅 adminGuard 后的路由使用）
   filesystem: new LocalFilesystem({ basePath: WORKSPACE_DIR }),
   skills: () => scanSkillPaths(),
 })

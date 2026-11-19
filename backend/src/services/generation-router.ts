@@ -50,6 +50,7 @@ async function upstreamPendingCount(config: AIConfig, model: string): Promise<{ 
 }
 
 export async function waitForUpstreamWatermark(id: number, config: AIConfig, model: string): Promise<void> {
+  // 仅按量付费百炼生效：在途列表接口只认中央域名，Model Router / Token Plan 套餐站点都查不到
   if (config.provider !== 'dashscope' || UPSTREAM_VIDEO_PENDING_WATERMARK <= 0) return
   const startedAt = Date.now()
   for (;;) {
@@ -102,6 +103,12 @@ export function isModelCompatibleWithMedia(model: string, media: { hasReferenceI
 }
 
 /**
+ * 只做素材形态过滤、不探上游负载的服务商：Model Router 与 Token Plan 套餐都没有百炼那个
+ * 按 apiKey 查在途量的中央接口，探它只会换来 403/404 白等一轮。
+ */
+const MEDIA_FILTER_ONLY_PROVIDERS = ['model-router', 'token-plan']
+
+/**
  * 多模型分流选模：候选为配置内全部视频模型（先按任务素材形态过滤）；单个候选负载探测失败（如部分模型不支持
  * 列表查询或触发 429）仅跳过该候选，成功不足 2 个才回退默认模型；
  * 否则取在途量最小者，负载相同取配置顺序靠前（通常即默认模型），避免无谓震荡。
@@ -113,11 +120,12 @@ export async function pickLeastLoadedVideoModel(
   fallback: string,
   media: { hasReferenceImages: boolean; hasFirstFrame: boolean } = { hasReferenceImages: false, hasFirstFrame: false },
 ): Promise<string> {
-  if (config.provider !== 'dashscope' && config.provider !== 'model-router') return fallback
+  const mediaFilterOnly = MEDIA_FILTER_ONLY_PROVIDERS.includes(config.provider)
+  if (config.provider !== 'dashscope' && !mediaFilterOnly) return fallback
   const models = (config.models || []).filter(m => !!m && m.trim())
-  // Model Router 没有百炼那个按 apiKey 查在途量的中央接口，只按素材形态过滤，不探负载：
+  // 无在途量查询接口的服务商只按素材形态过滤，不探负载：
   // 配置把 i2v/r2v 排在首位时，无首帧/无参考图的任务会被换成兼容模型，而不是提交必失败。
-  if (config.provider === 'model-router') {
+  if (mediaFilterOnly) {
     const compatible = models.filter(m => isModelCompatibleWithMedia(m, media))
     if (!compatible.length) return fallback
     const picked = compatible.includes(fallback) ? fallback : compatible[0]

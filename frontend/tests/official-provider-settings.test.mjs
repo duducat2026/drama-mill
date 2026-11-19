@@ -39,12 +39,13 @@ test('settings page exposes official provider templates only', () => {
   assert.doesNotMatch(useApi, /vendorPreset/i)
   assert.doesNotMatch(useApi, /\/vendor-preset/)
 
-  // 官方厂商模板：Gemini / OpenAI / 火山 / MiniMax / 百炼 DashScope / Model Router 网关
-  assert.match(settingsPage, /const providers = \['gemini', 'openai', 'volcengine', 'minimax', 'dashscope', 'model-router'\]/)
+  // 官方厂商模板：Gemini / OpenAI / 火山 / MiniMax / 百炼 DashScope / 百炼 Token Plan / Model Router 网关
+  assert.match(settingsPage, /const providers = \['gemini', 'openai', 'volcengine', 'minimax', 'dashscope', 'token-plan', 'model-router'\]/)
   assert.match(settingsPage, /https:\/\/generativelanguage\.googleapis\.com/)
   assert.match(settingsPage, /https:\/\/api\.openai\.com/)
   assert.match(settingsPage, /https:\/\/ark\.cn-beijing\.volces\.com/)
   assert.match(settingsPage, /https:\/\/dashscope\.aliyuncs\.com\/api\/v1/)
+  assert.match(settingsPage, /https:\/\/token-plan\.cn-beijing\.maas\.aliyuncs\.com/)
   assert.match(settingsPage, /https:\/\/model-router\.edu-aliyun\.com/)
   assert.doesNotMatch(settingsPage, /https:\/\/api\.vidu\.com/)
   // 内置厂商快捷配置（含历史专属工作空间网关）已移除，网关由用户在配置中自行填写
@@ -108,6 +109,57 @@ test('Model Router 网关模板：三类齐全 + Base URL 只填站点根 + 模�
   assert.match(providerPresetBlock('video'), /t2v\/i2v\/r2v 三种模式的素材要求互斥/)
 })
 
+test('百炼 Token Plan 模板：只开放文本与视频 + 文本走 compatible-mode、视频走站点根', () => {
+  for (const type of ['text', 'video']) {
+    const block = providerPresetBlock(type)
+    assert.match(block, /'token-plan': \{/)
+    assert.match(block, /hint: `?\$?\{?TOKEN_PLAN_HINT/)
+  }
+  // 图片服务不开放套餐（套餐图片端点仅支持同步，异步 text2image 实测 403）：模板里不得出现 token-plan
+  assert.doesNotMatch(providerPresetBlock('image'), /token-plan/)
+  // 套餐站点根：文本模板带 /compatible-mode/v1，视频只到站点根（后端补 /api/v1）
+  assert.match(providerPresetBlock('text'), /baseUrl: 'https:\/\/token-plan\.cn-beijing\.maas\.aliyuncs\.com\/compatible-mode\/v1'/)
+  assert.match(providerPresetBlock('video'), /baseUrl: 'https:\/\/token-plan\.cn-beijing\.maas\.aliyuncs\.com'/)
+  // 套餐 Key 与按量付费 Key / Base URL 完全隔离，混用最常见，提示里必须说清
+  assert.match(settingsPage, /const TOKEN_PLAN_HINT = 'Token Plan 套餐 Key 以 sk-sp- 开头/)
+  assert.match(settingsPage, /与按量付费的 sk- Key \/ dashscope\.aliyuncs\.com 混用会 401\/403/)
+  assert.match(settingsPage, /套餐不提供图片服务，生图请用按量付费百炼/)
+  assert.match(settingsPage, /const providers = \[[^\]]*'token-plan', 'model-router'\]/)
+  // 服务商下拉按服务类型过滤，镜像后端 officialProviders 白名单
+  assert.match(settingsPage, /const providersByType = \{/)
+  assert.match(settingsPage, /image: \['gemini', 'openai', 'volcengine', 'dashscope', 'model-router'\]/)
+  assert.match(settingsPage, /const providerSelectOptions = computed\(\(\) => \(providersByType\[cfgServiceType\.value\] \|\| providers\)/)
+  // 套餐内推荐模型：文本 qwen3.8-flash、视频 wan3.0-video + happyhorse 三模式
+  assert.match(providerPresetBlock('text'), /'qwen3\.8-flash'/)
+  assert.match(providerPresetBlock('video'), /'wan3\.0-video'/)
+  assert.match(providerPresetBlock('video'), /'happyhorse-1\.1-t2v'/)
+  assert.match(providerPresetBlock('video'), /'happyhorse-1\.1-i2v'/)
+  assert.match(providerPresetBlock('video'), /'happyhorse-1\.1-r2v'/)
+  // 套餐未收录的模型（wan2.7-t2v / wan2.7-i2v）回 404 Model not exist，提示里给出替代
+  assert.match(settingsPage, /const TOKEN_PLAN_MODEL_HINT = ' 套餐未收录的模型会回 404 Model not exist/)
+  assert.match(providerPresetBlock('video'), /\$\{TOKEN_PLAN_HINT\}\$\{TOKEN_PLAN_MODEL_HINT\}/)
+})
+
+test('服务商下拉与模板按服务类型过滤：图片侧选不到百炼 Token Plan', () => {
+  // 下拉必须是按类型的：否则图片页仍能选 token-plan，保存时吃后端 400 Unsupported service_type/provider
+  const image = mountConfigLogic({ type: 'image' })
+  const imageProviders = image.providerSelectOptions.value.map(o => o.value)
+  assert.ok(!imageProviders.includes('token-plan'), '图片下拉不应出现 token-plan')
+  assert.ok(!imageProviders.includes('minimax'), '图片下拉不应出现只有视频的 minimax')
+  // 过滤不能误伤：白名单内的 volcengine 虽无图片模板，仍须可选
+  assert.ok(imageProviders.includes('dashscope') && imageProviders.includes('volcengine'))
+  assert.ok(!image.presetsByType('image').some(p => p.provider === 'token-plan'))
+
+  const video = mountConfigLogic({ type: 'video' })
+  const videoProviders = video.providerSelectOptions.value.map(o => o.value)
+  assert.ok(videoProviders.includes('token-plan') && videoProviders.includes('minimax'))
+  assert.ok(video.presetsByType('video').some(p => p.provider === 'token-plan'))
+
+  const text = mountConfigLogic({ type: 'text' })
+  assert.ok(text.providerSelectOptions.value.map(o => o.value).includes('token-plan'))
+  assert.ok(text.presetsByType('text').some(p => p.provider === 'token-plan'))
+})
+
 test('only text service configs expose the connection test button', () => {
   assert.match(settingsPage, /v-if="st\.type === 'text'" class="btn btn-ghost btn-sm" @click="testExistingCfg\(c\)">连通/)
 })
@@ -147,6 +199,7 @@ function mountConfigLogic({ type = 'text', id = 'new', configs = [], api = {}, q
       startAddCfg: s.startAddCfg, startEditCfg: s.startEditCfg, backToConfigs: s.backToConfigs,
       confirmLeaveCfg: s.confirmLeaveCfg, testDraftCfg: s.testDraftCfg,
       selectServiceTab: s.selectServiceTab, isDefaultModel: s.isDefaultModel,
+      providerSelectOptions: s.providerSelectOptions, presetsByType: s.presetsByType,
     }
   `
   const state = runInNewContext(`(() => { ${body} })()`, {

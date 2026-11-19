@@ -152,7 +152,7 @@ nginx/                       — 反向代理模板（SSE 关缓冲、/static �
 |---|---|---|
 | `DATABASE_URL` | — | 完整 MySQL 连接串（优先于分项配置） |
 | `MYSQL_HOST` / `MYSQL_PORT` | `127.0.0.1` / `3306` | 未设 `DATABASE_URL` 时分项配置；容器内未配置时自动改用 `host.docker.internal` |
-| `MYSQL_USER` / `MYSQL_PASSWORD` | `dramamill` / `dramamill_tool` | 未设置时的回退值 |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | — | **无内置默认值**：未设 `DATABASE_URL` 时必须显式配置，否则启动即报 `[FATAL]` 退出 |
 | `MYSQL_DATABASE` | `drama_mill` | 库名 |
 | `MYSQL_CONNECTION_LIMIT` / `MYSQL_QUEUE_LIMIT` | `30` / `200` | 连接池大小与排队上限 |
 | `PORT` | `5679` | 后端服务端口 |
@@ -210,7 +210,7 @@ cd ../backend && npm start
 首次启动自动建表（幂等，每次启动重放初始化与增量迁移）：
 
 ```bash
-DATABASE_URL=mysql://dramamill:dramamill_tool@127.0.0.1:3306/drama_mill npm start
+DATABASE_URL=mysql://dramamill:CHANGE_ME@127.0.0.1:3306/drama_mill npm start   # CHANGE_ME 换成你自己的口令
 ```
 
 - 共 **30 张表**，覆盖剧集/分集/分镜/资产/任务/AI 配置/风格/用量/审计/模型目录等。
@@ -220,14 +220,14 @@ DATABASE_URL=mysql://dramamill:dramamill_tool@127.0.0.1:3306/drama_mill npm star
 
 ### 🔑 首次使用
 
-1. 登录。首次启动会幂等播种两个默认账号（登录页出于安全**仅提示普通用户账号**，管理员账号以下表为准，两者默认口令相同）：
+1. 登录。首次启动会幂等播种两个默认账号，**初始口令在首次建号时随机生成，且只在服务启动控制台打印一次**（登录页与文档均不再记录口令）：
 
    | 角色 | 用户名 | 默认口令 | 用途 |
    |---|---|---|---|
-   | 普通用户 | `test` | `drama-mill` | 日常创作：项目 / 小说 / 分镜 / 生成，仅可见自己的数据 |
-   | 管理员 | `drama-mill` | `drama-mill` | 管理后台：账号、审计、成本、存储配额、网关、监控等治理 |
+   | 普通用户 | `test` | 首次启动时查看控制台输出 | 日常创作：项目 / 小说 / 分镜 / 生成，仅可见自己的数据 |
+   | 管理员 | `drama-mill` | 首次启动时查看控制台输出 | 管理后台：账号、审计、成本、存储配额、网关、监控等治理 |
 
-   > ⚠️ **登录后请立即在「右上角账号区 → 修改密码」更换默认口令**。管理员账号不进入公开登录页提示、只在本 README 记录，以缩小公网环境的爆破面；若库内已存在任意管理员，播种会自动跳过新建（沿用已有账号）。
+   > ⚠️ **初始口令只显示一次，请立即保存，并在登录后于「右上角账号区 → 修改密码」改为自己的口令**（改密后该用户已签发的旧登录态立即失效）。若库内已存在任意管理员，播种会自动跳过新建（沿用已有账号，不再打印口令）。
 2. 打开「设置」页 → AI 服务配置，按文本 / 图片 / 视频三栏分别添加服务：
    - 选择官方厂商模板自动填入 Base URL 与推荐模型，再填自己的 API Key
    - 用「测试配置 / 生成测试」验证连通性，失败会给出中文化原因
@@ -323,7 +323,7 @@ server {
 
 ### 🐳 Docker（备选）
 
-仓库保留 `Dockerfile` + `docker-compose.yml`（应用 + MySQL 8.4 + 健康检查）。MySQL 数据卷首次初始化时自动执行 `docker/init.sql`（建表+种子）与 `docker/model-catalog-data.sql`（模型目录快照），开箱即带全部基础数据。多阶段构建镜像仍以 `node:20-slim` 为基础，而运行时要求 Node 22+，使用 Docker 部署前请先升级镜像基础层，或优先采用上面的 PM2 一键部署路径。
+仓库保留 `Dockerfile` + `docker-compose.yml`（应用 + MySQL 8.4 + 健康检查）。MySQL 数据卷首次初始化时自动执行 `docker/init.sql`（建表+种子）与 `docker/model-catalog-data.sql`（模型目录快照），开箱即带全部基础数据。多阶段构建镜像以 `node:22-slim` 为基础，运行时以非 root 的 `node` 用户执行；compose 不提供任何默认口令，启动前须在项目根目录 `.env` 中设置 `DATABASE_URL`、`MYSQL_ROOT_PASSWORD`、`MYSQL_USER`、`MYSQL_PASSWORD`（缺失时 compose 直接报错退出），应用与 MySQL 端口仅绑定 `127.0.0.1`，对外发布请自行前置反向代理。
 
 ### 🧮 常用检查命令
 
